@@ -1,0 +1,39 @@
+{
+    "name": "vite-project",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "bunx --bun vite",
+        "build": "bunx --bun vite build",
+        "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+        "preview": "bunx --bun vite preview"
+    },
+    "dependencies": {
+        "@headlessui/react": "^1.7.19",
+        "dotenv": "^16.5.0",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1"
+    },
+    "devDependencies": {
+        "@types/node": "^20.17.57",
+        "@types/react": "^18.3.23",
+        "@types/react-dom": "^18.3.7",
+        "@typescript-eslint/eslint-plugin": "^6.21.0",
+        "@typescript-eslint/parser": "^6.21.0",
+        "@vitejs/plugin-react": "^4.5.0",
+        "@vitejs/plugin-react-swc": "^3.10.0",
+        "autoprefixer": "^10.4.21",
+        "eslint": "^8.57.1",
+        "eslint-config-prettier": "^9.1.0",
+        "eslint-plugin-react": "^7.37.5",
+        "eslint-plugin-react-hooks": "^4.6.2",
+        "eslint-plugin-react-refresh": "^0.4.20",
+        "eslint-plugin-tailwindcss": "^3.18.0",
+        "postcss": "^8.5.4",
+        "prettier": "^3.5.3",
+        "tailwindcss": "^3.4.17",
+        "typescript": "^5.8.3",
+        "vite": "^4.5.14"
+    }
+}
