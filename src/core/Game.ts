@@ -1,5 +1,8 @@
 import { renderer } from '../render/Renderer'
 import { InputController } from '../utils/Input'
+import { Signal } from '../utils/Signal'
+
+export const FPS = new Signal<number>(0)
 
 export function startGame() {
     console.log('Game started')
@@ -7,9 +10,19 @@ export function startGame() {
     const inputController = new InputController()
 
     let lastTime = performance.now()
+    const frameTimes: number[] = []
+    const maxFrames = 60 // average over last 60 frames
+
     function gameLoop(currentTime: number) {
         const deltaTime = currentTime - lastTime
         lastTime = currentTime
+
+        // --- Average FPS calculation ---
+        frameTimes.push(deltaTime)
+        if (frameTimes.length > maxFrames) frameTimes.shift()
+        const avgDelta =
+            frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length
+        FPS.data = 1000 / avgDelta
 
         update(deltaTime)
         renderer.Draw()

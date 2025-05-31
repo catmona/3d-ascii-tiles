@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
 import { renderer } from '../render/Renderer'
-import { render } from 'react-dom'
+import { FPS } from '../core/Game'
 
 export default function HUD() {
-    const [fps, setFps] = useState(60)
+    const [fps, setFps] = useState(FPS.data)
     const [position, setPosition] = useState(renderer.Camera.position.data)
     const [rotation, setRotation] = useState(renderer.Camera.rotation.data)
     const [pitch, setPitch] = useState(renderer.Camera.pitch.data)
 
     useEffect(() => {
+        const fpsListener = (newFps: typeof FPS.data) => {
+            setFps(newFps)
+        }
         const positionListener = (
             newPosition: typeof renderer.Camera.position.data
         ) => {
@@ -23,11 +26,13 @@ export default function HUD() {
             setPitch(newPitch)
         }
 
+        FPS.addListener(fpsListener)
         renderer.Camera.position.addListener(positionListener)
         renderer.Camera.rotation.addListener(rotationListener)
         renderer.Camera.pitch.addListener(pitchListener)
 
         return () => {
+            FPS.removeListener(fpsListener)
             renderer.Camera.position.removeListener(positionListener)
             renderer.Camera.rotation.removeListener(rotationListener)
             renderer.Camera.pitch.removeListener(pitchListener)
@@ -36,7 +41,7 @@ export default function HUD() {
 
     return (
         <div>
-            {/* <div>FPS: 60</div> */}
+            <div>FPS: {fps}</div>
             <div>
                 Position: ({position.x}, {position.y}, {position.z})
             </div>
