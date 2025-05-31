@@ -12,11 +12,11 @@ export class Renderer {
 
     public constructor() {
         this.tileSize = 20
-        this.mapWidth = 40
-        this.mapHeight = 40
+        this.mapWidth = 400
+        this.mapHeight = 400
         this.Camera = new Camera()
         this.canvas = document.getElementById('layer-game') as HTMLCanvasElement
-        this.ctx = this.canvas!.getContext('2d')!
+        this.ctx = this.canvas.getContext('2d')!
 
         this.canvas.width = window.innerWidth
         this.canvas.height = window.innerHeight
@@ -54,8 +54,8 @@ export class Renderer {
         const cosRot = Math.cos(this.Camera.rotation)
         const sinRot = Math.sin(this.Camera.rotation)
 
-        const worldX = pos.x - this.mapWidth / 2
-        const worldY = pos.y - this.mapHeight / 2
+        const worldX = pos.x - this.Camera.position.x
+        const worldY = pos.y - this.Camera.position.y
 
         const rotatedX = worldX * cosRot - worldY * sinRot
         const rotatedY = worldX * sinRot + worldY * cosRot
@@ -68,6 +68,20 @@ export class Renderer {
         return [isoX, isoY]
     }
 
+    private isVisible(
+        screenX: number,
+        screenY: number,
+        canvasWidth: number,
+        canvasHeight: number
+    ): boolean {
+        return (
+            screenX >= -this.tileSize &&
+            screenY >= -this.tileSize &&
+            screenX <= canvasWidth + this.tileSize &&
+            screenY <= canvasHeight + this.tileSize
+        )
+    }
+
     public Draw() {
         if (!this.canvas || !this.ctx) return
 
@@ -75,7 +89,6 @@ export class Renderer {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
 
         this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2)
-        this.ctx.scale(this.Camera.zoom, this.Camera.zoom)
 
         this.ctx.font = `${this.tileSize}px monospace`
         this.ctx.textAlign = 'center'
@@ -85,8 +98,17 @@ export class Renderer {
             for (let x = 0; x < this.mapWidth; x++) {
                 const tile = this.map[y][x]
                 const [sx, sy] = this.toScreen(new Vector3(x, y, tile.height))
-                this.ctx.fillStyle = tile.color
-                this.ctx.fillText(tile.char, sx, sy)
+                if (
+                    this.isVisible(
+                        sx + this.canvas.width / 2,
+                        sy + this.canvas.height / 2,
+                        this.canvas.width,
+                        this.canvas.height
+                    )
+                ) {
+                    this.ctx.fillStyle = tile.color
+                    this.ctx.fillText(tile.char, sx, sy)
+                }
             }
         }
     }
