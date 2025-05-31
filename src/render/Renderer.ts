@@ -9,10 +9,60 @@ export class Renderer {
     public Camera: Camera
     private canvas: HTMLCanvasElement
     private ctx: CanvasRenderingContext2D
-    // In Renderer class
     private charAtlas: HTMLCanvasElement
     private charAtlasCtx: CanvasRenderingContext2D
     private charAtlasMap: Map<string, { x: number; y: number }> = new Map()
+
+    public constructor() {
+        this.tileSize = 20
+        this.mapWidth = 400
+        this.mapHeight = 400
+        this.Camera = new Camera()
+        this.canvas = document.getElementById('layer-game') as HTMLCanvasElement
+        this.ctx = this.canvas.getContext('2d')!
+
+        this.ctx.font = `${this.tileSize}px monospace`
+        this.ctx.textAlign = 'center'
+        this.ctx.textBaseline = 'middle'
+        this.ctx.imageSmoothingEnabled = false
+
+        this.canvas.width = window.innerWidth
+        this.canvas.height = window.innerHeight
+
+        this.canvas.addEventListener('click', () => {
+            void this.canvas.requestPointerLock()
+        })
+
+        // Generate field of grass with visual variation
+        const grassChars = ['.', ',', '`', '·']
+        const grassColors = [
+            '#228B22',
+            '#2E8B57',
+            '#6B8E23',
+            '#556B2F',
+            '#7CFC00',
+        ]
+
+        this.buildCharAtlas(grassChars, grassColors)
+
+        // default map
+        this.map = []
+        for (let y = 0; y < this.mapHeight; y++) {
+            const row = []
+            for (let x = 0; x < this.mapWidth; x++) {
+                row.push({
+                    char: grassChars[
+                        Math.floor(Math.random() * grassChars.length)
+                    ],
+                    color: grassColors[
+                        Math.floor(Math.random() * grassColors.length)
+                    ],
+                    height: Math.floor(Math.random() * 2), // small variation
+                })
+            }
+            this.map.push(row)
+        }
+    }
 
     private buildCharAtlas(chars: string[], colors: string[]) {
         const size = this.tileSize
@@ -40,57 +90,6 @@ export class Renderer {
                     y: r * size,
                 })
             }
-        }
-    }
-
-    public constructor() {
-        this.tileSize = 20
-        this.mapWidth = 100
-        this.mapHeight = 100
-        this.Camera = new Camera()
-        this.canvas = document.getElementById('layer-game') as HTMLCanvasElement
-        this.ctx = this.canvas.getContext('2d')!
-
-        this.ctx.font = `${this.tileSize}px monospace`
-        this.ctx.textAlign = 'center'
-        this.ctx.textBaseline = 'middle'
-        this.ctx.imageSmoothingEnabled = false
-
-        this.canvas.width = window.innerWidth
-        this.canvas.height = window.innerHeight
-
-        this.canvas.addEventListener('click', () => {
-            void this.canvas.requestPointerLock()
-        })
-
-        // Generate field of grass with visual variation
-        const grassChars = ['.', ',', '`', '·', '']
-        const grassColors = [
-            '#228B22',
-            '#2E8B57',
-            '#6B8E23',
-            '#556B2F',
-            '#7CFC00',
-        ]
-
-        this.buildCharAtlas(grassChars, grassColors)
-
-        // default map
-        this.map = []
-        for (let y = 0; y < this.mapHeight; y++) {
-            const row = []
-            for (let x = 0; x < this.mapWidth; x++) {
-                row.push({
-                    char: grassChars[
-                        Math.floor(Math.random() * grassChars.length)
-                    ],
-                    color: grassColors[
-                        Math.floor(Math.random() * grassColors.length)
-                    ],
-                    height: Math.floor(Math.random() * 2), // small variation
-                })
-            }
-            this.map.push(row)
         }
     }
 
@@ -177,8 +176,8 @@ export class Renderer {
                             atlasPos.y,
                             this.tileSize,
                             this.tileSize,
-                            sx - this.tileSize / 2,
-                            sy - this.tileSize / 2,
+                            Math.round(sx - this.tileSize / 2),
+                            Math.round(sy - this.tileSize / 2),
                             this.tileSize,
                             this.tileSize
                         )

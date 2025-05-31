@@ -33,9 +33,8 @@ export function startGame() {
 
     function update(deltaTime: number) {
         // Update game logic here
-        // For example, you can update the camera position based on input
         if (inputController.keys.has('w')) {
-            renderer.Camera.MoveForward(deltaTime * 0.01) // Adjust speed as needed
+            renderer.Camera.MoveForward(deltaTime * 0.01)
         }
         if (inputController.keys.has('s')) {
             renderer.Camera.MoveBack(deltaTime * 0.01)
