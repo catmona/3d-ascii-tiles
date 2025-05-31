@@ -1,12 +1,10 @@
 import { Camera } from './Camera'
 import { Vector3 } from '../core/Types'
+import { TileMap } from '../map/TileMap'
 
 export class Renderer {
-    private tileSize: number
-    private mapWidth: number
-    private mapHeight: number
-    private map = [] as { char: string; color: string; height: number }[][]
     public Camera: Camera
+    public map: TileMap
     private canvas: HTMLCanvasElement
     private ctx: CanvasRenderingContext2D
     private charAtlas: HTMLCanvasElement
@@ -14,14 +12,12 @@ export class Renderer {
     private charAtlasMap: Map<string, { x: number; y: number }> = new Map()
 
     public constructor() {
-        this.tileSize = 20
-        this.mapWidth = 400
-        this.mapHeight = 400
         this.Camera = new Camera()
+        this.map = new TileMap(20, 400, 400)
         this.canvas = document.getElementById('layer-game') as HTMLCanvasElement
         this.ctx = this.canvas.getContext('2d')!
 
-        this.ctx.font = `${this.tileSize}px monospace`
+        this.ctx.font = `${this.map.tileSize}px monospace`
         this.ctx.textAlign = 'center'
         this.ctx.textBaseline = 'middle'
         this.ctx.imageSmoothingEnabled = false
@@ -33,64 +29,7 @@ export class Renderer {
             void this.canvas.requestPointerLock()
         })
 
-        // Generate field of grass with visual variation
-        const grassChars = ['.', ',', '`', '·']
-        const grassColors = [
-            '#228B22',
-            '#2E8B57',
-            '#6B8E23',
-            '#556B2F',
-            '#7CFC00',
-        ]
-
-        this.buildCharAtlas(grassChars, grassColors)
-
-        // default map
-        this.map = []
-        for (let y = 0; y < this.mapHeight; y++) {
-            const row = []
-            for (let x = 0; x < this.mapWidth; x++) {
-                row.push({
-                    char: grassChars[
-                        Math.floor(Math.random() * grassChars.length)
-                    ],
-                    color: grassColors[
-                        Math.floor(Math.random() * grassColors.length)
-                    ],
-                    height: Math.floor(Math.random() * 2), // small variation
-                })
-            }
-            this.map.push(row)
-        }
-    }
-
-    private buildCharAtlas(chars: string[], colors: string[]) {
-        const size = this.tileSize
-        const atlasCols = chars.length
-        const atlasRows = colors.length
-        this.charAtlas = document.createElement('canvas')
-        this.charAtlas.width = atlasCols * size
-        this.charAtlas.height = atlasRows * size
-        this.charAtlasCtx = this.charAtlas.getContext('2d')!
-
-        this.charAtlasCtx.font = `${size}px monospace`
-        this.charAtlasCtx.textAlign = 'center'
-        this.charAtlasCtx.textBaseline = 'middle'
-
-        for (let c = 0; c < chars.length; c++) {
-            for (let r = 0; r < colors.length; r++) {
-                const char = chars[c]
-                const color = colors[r]
-                const x = c * size + size / 2
-                const y = r * size + size / 2
-                this.charAtlasCtx.fillStyle = color
-                this.charAtlasCtx.fillText(char, x, y)
-                this.charAtlasMap.set(`${char}_${color}`, {
-                    x: c * size,
-                    y: r * size,
-                })
-            }
-        }
+        this.buildCharAtlas(this.map.chars, this.map.colors)
     }
 
     private toScreen(pos: Vector3) {
@@ -103,10 +42,10 @@ export class Renderer {
         const rotatedX = worldX * cosRot - worldY * sinRot
         const rotatedY = worldX * sinRot + worldY * cosRot
 
-        const isoX = rotatedX * this.tileSize
+        const isoX = rotatedX * this.map.tileSize
         const isoY =
-            rotatedY * this.tileSize * Math.sin(this.Camera.pitch.data) -
-            pos.z * (this.tileSize / 2)
+            rotatedY * this.map.tileSize * Math.sin(this.Camera.pitch.data) -
+            pos.z * (this.map.tileSize / 2)
 
         return [isoX, isoY]
     }
@@ -118,13 +57,40 @@ export class Renderer {
         canvasHeight: number
     ): boolean {
         return (
-            screenX >= -this.tileSize &&
-            screenY >= -this.tileSize &&
-            screenX <= canvasWidth + this.tileSize &&
-            screenY <= canvasHeight + this.tileSize
+            screenX >= -this.map.tileSize &&
+            screenY >= -this.map.tileSize &&
+            screenX <= canvasWidth + this.map.tileSize &&
+            screenY <= canvasHeight + this.map.tileSize
         )
     }
 
+    private buildCharAtlas(chars: string[], colors: string[]) {
+        this.charAtlas = document.createElement('canvas')
+        this.charAtlas.width = this.map.tileSize * chars.length
+        this.charAtlas.height = this.map.tileSize * colors.length
+        this.charAtlasCtx = this.charAtlas.getContext('2d')!
+
+        this.charAtlasCtx.font = `${this.map.tileSize}px monospace`
+        this.charAtlasCtx.textAlign = 'center'
+        this.charAtlasCtx.textBaseline = 'middle'
+
+        for (let i = 0; i < chars.length; i++) {
+            for (let j = 0; j < colors.length; j++) {
+                const char = chars[i]
+                const color = colors[j]
+                this.charAtlasCtx.fillStyle = color
+                this.charAtlasCtx.fillText(
+                    char,
+                    i * this.map.tileSize + this.map.tileSize / 2,
+                    j * this.map.tileSize + this.map.tileSize / 2
+                )
+                this.charAtlasMap.set(`${char}_${color}`, {
+                    x: i * this.map.tileSize,
+                    y: j * this.map.tileSize,
+                })
+            }
+        }
+    }
     public Draw() {
         if (!this.canvas || !this.ctx) return
 
@@ -137,8 +103,8 @@ export class Renderer {
         const searchRadius =
             Math.ceil(
                 Math.sqrt(
-                    (this.canvas.width / this.tileSize) ** 2 +
-                        (this.canvas.height / this.tileSize) ** 2
+                    (this.canvas.width / this.map.tileSize) ** 2 +
+                        (this.canvas.height / this.map.tileSize) ** 2
                 ) / 2
             ) + 2
 
@@ -147,14 +113,17 @@ export class Renderer {
         const camY = this.Camera.position.data.y
 
         const minX = Math.max(0, Math.floor(camX - searchRadius))
-        const maxX = Math.min(this.mapWidth, Math.ceil(camX + searchRadius))
+        const maxX = Math.min(this.map.mapWidth, Math.ceil(camX + searchRadius))
         const minY = Math.max(0, Math.floor(camY - searchRadius))
-        const maxY = Math.min(this.mapHeight, Math.ceil(camY + searchRadius))
+        const maxY = Math.min(
+            this.map.mapHeight,
+            Math.ceil(camY + searchRadius)
+        )
 
         const tempVec = new Vector3(0, 0, 0)
         for (let y = minY; y < maxY; y++) {
             for (let x = minX; x < maxX; x++) {
-                const tile = this.map[y][x]
+                const tile = this.map.map[y][x]
                 tempVec.x = x
                 tempVec.y = y
                 tempVec.z = tile.height
@@ -175,12 +144,12 @@ export class Renderer {
                             this.charAtlas,
                             atlasPos.x,
                             atlasPos.y,
-                            this.tileSize,
-                            this.tileSize,
-                            sx - this.tileSize / 2,
-                            sy - this.tileSize / 2,
-                            this.tileSize,
-                            this.tileSize
+                            this.map.tileSize,
+                            this.map.tileSize,
+                            sx - this.map.tileSize / 2,
+                            sy - this.map.tileSize / 2,
+                            this.map.tileSize,
+                            this.map.tileSize
                         )
                     }
                 }
