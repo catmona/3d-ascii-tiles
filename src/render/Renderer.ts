@@ -142,6 +142,7 @@ export class Renderer {
                 ) / 2
             ) + 2
 
+        // frustum culling calculations
         const camX = this.Camera.position.data.x
         const camY = this.Camera.position.data.y
 
@@ -176,8 +177,8 @@ export class Renderer {
                             atlasPos.y,
                             this.tileSize,
                             this.tileSize,
-                            Math.round(sx - this.tileSize / 2),
-                            Math.round(sy - this.tileSize / 2),
+                            sx - this.tileSize / 2,
+                            sy - this.tileSize / 2,
                             this.tileSize,
                             this.tileSize
                         )
