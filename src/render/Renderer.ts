@@ -51,6 +51,11 @@ export class Renderer {
         this.canvas = document.getElementById('layer-game') as HTMLCanvasElement
         this.ctx = this.canvas.getContext('2d')!
 
+        this.ctx.font = `${this.tileSize}px monospace`
+        this.ctx.textAlign = 'center'
+        this.ctx.textBaseline = 'middle'
+        this.ctx.imageSmoothingEnabled = false
+
         this.canvas.width = window.innerWidth
         this.canvas.height = window.innerHeight
 
@@ -129,10 +134,6 @@ export class Renderer {
 
         this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2)
 
-        this.ctx.font = `${this.tileSize}px monospace`
-        this.ctx.textAlign = 'center'
-        this.ctx.textBaseline = 'middle'
-
         // --- Culling: calculate visible tile bounds (axis-aligned, no rotation/pitch compensation) ---
         const searchRadius =
             Math.ceil(
@@ -150,10 +151,14 @@ export class Renderer {
         const minY = Math.max(0, Math.floor(camY - searchRadius))
         const maxY = Math.min(this.mapHeight, Math.ceil(camY + searchRadius))
 
+        const tempVec = new Vector3(0, 0, 0)
         for (let y = minY; y < maxY; y++) {
             for (let x = minX; x < maxX; x++) {
                 const tile = this.map[y][x]
-                const [sx, sy] = this.toScreen(new Vector3(x, y, tile.height))
+                tempVec.x = x
+                tempVec.y = y
+                tempVec.z = tile.height
+                const [sx, sy] = this.toScreen(tempVec)
                 if (
                     this.isVisible(
                         sx + this.canvas.width / 2,

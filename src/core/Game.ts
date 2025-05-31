@@ -4,7 +4,7 @@ import { InputController } from '../utils/Input'
 export function startGame() {
     console.log('Game started')
 
-    const inputController = new InputController(renderer.Camera)
+    const inputController = new InputController()
 
     let lastTime = performance.now()
     function gameLoop(currentTime: number) {
