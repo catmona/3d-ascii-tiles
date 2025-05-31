@@ -37,7 +37,7 @@ export class Camera {
         }
     }
 
-    public move(dx: number, dy: number, dz: number) {
+    private move(dx: number, dy: number, dz: number) {
         this.position.data = {
             x: this.position.data.x + dx,
             y: this.position.data.y + dy,
@@ -48,5 +48,34 @@ export class Camera {
     public rotate(dRotation: number) {
         this.rotation.data += dRotation
         this.UpdateDirectionVectors()
+    }
+
+    public MoveForward(speed: number) {
+        this.move(
+            -Math.sin(this.rotation.data) * speed,
+            -Math.cos(this.rotation.data) * speed,
+            0
+        )
+    }
+    public MoveBack(speed: number) {
+        this.move(
+            Math.sin(this.rotation.data) * speed,
+            Math.cos(this.rotation.data) * speed,
+            0
+        )
+    }
+    public MoveLeft(speed: number) {
+        this.move(
+            -Math.cos(this.rotation.data) * speed,
+            Math.sin(this.rotation.data) * speed,
+            0
+        )
+    }
+    public MoveRight(speed: number) {
+        this.move(
+            Math.cos(this.rotation.data) * speed,
+            -Math.sin(this.rotation.data) * speed,
+            0
+        )
     }
 }

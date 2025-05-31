@@ -6,7 +6,7 @@ export default function HUD() {
     const [fps, setFps] = useState(60)
     const [position, setPosition] = useState(renderer.Camera.position.data)
     const [rotation, setRotation] = useState(renderer.Camera.rotation.data)
-    const [forward, setForward] = useState(renderer.Camera.forward.data)
+    const [pitch, setPitch] = useState(renderer.Camera.pitch.data)
 
     useEffect(() => {
         const positionListener = (
@@ -19,20 +19,18 @@ export default function HUD() {
         ) => {
             setRotation(newRotation)
         }
-        const forwardListener = (
-            newForward: typeof renderer.Camera.forward.data
-        ) => {
-            setForward(newForward)
+        const pitchListener = (newPitch: typeof renderer.Camera.pitch.data) => {
+            setPitch(newPitch)
         }
 
         renderer.Camera.position.addListener(positionListener)
         renderer.Camera.rotation.addListener(rotationListener)
-        renderer.Camera.forward.addListener(forwardListener)
+        renderer.Camera.pitch.addListener(pitchListener)
 
         return () => {
             renderer.Camera.position.removeListener(positionListener)
             renderer.Camera.rotation.removeListener(rotationListener)
-            renderer.Camera.forward.removeListener(forwardListener)
+            renderer.Camera.pitch.removeListener(pitchListener)
         }
     }, [])
 
@@ -43,7 +41,7 @@ export default function HUD() {
                 Position: ({position.x}, {position.y}, {position.z})
             </div>
             <div>Rotation: {rotation}°</div>
-            Forward: ({forward.x}, {forward.y}, {forward.z})
+            <div>Pitch: {pitch}°</div>
         </div>
     )
 }

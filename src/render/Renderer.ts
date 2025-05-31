@@ -21,6 +21,10 @@ export class Renderer {
         this.canvas.width = window.innerWidth
         this.canvas.height = window.innerHeight
 
+        this.canvas.addEventListener('click', () => {
+            void this.canvas.requestPointerLock()
+        })
+
         // Generate field of grass with visual variation
         const grassChars = ['.', ',', '`', '·', '']
         const grassColors = [
