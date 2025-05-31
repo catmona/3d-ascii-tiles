@@ -6,8 +6,8 @@ export class InputController {
     public constructor() {
         window.addEventListener('mousemove', (e) => {
             if (document.pointerLockElement) {
-                const dx = e.movementX
-                const dy = e.movementY
+                const dx = -e.movementX
+                const dy = -e.movementY
 
                 renderer.Camera.rotate(dx * 0.002) // adjust sensitivity
 
