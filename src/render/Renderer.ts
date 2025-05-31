@@ -133,8 +133,25 @@ export class Renderer {
         this.ctx.textAlign = 'center'
         this.ctx.textBaseline = 'middle'
 
-        for (let y = 0; y < this.mapHeight; y++) {
-            for (let x = 0; x < this.mapWidth; x++) {
+        // --- Culling: calculate visible tile bounds (axis-aligned, no rotation/pitch compensation) ---
+        const searchRadius =
+            Math.ceil(
+                Math.sqrt(
+                    (this.canvas.width / this.tileSize) ** 2 +
+                        (this.canvas.height / this.tileSize) ** 2
+                ) / 2
+            ) + 2
+
+        const camX = this.Camera.position.data.x
+        const camY = this.Camera.position.data.y
+
+        const minX = Math.max(0, Math.floor(camX - searchRadius))
+        const maxX = Math.min(this.mapWidth, Math.ceil(camX + searchRadius))
+        const minY = Math.max(0, Math.floor(camY - searchRadius))
+        const maxY = Math.min(this.mapHeight, Math.ceil(camY + searchRadius))
+
+        for (let y = minY; y < maxY; y++) {
+            for (let x = minX; x < maxX; x++) {
                 const tile = this.map[y][x]
                 const [sx, sy] = this.toScreen(new Vector3(x, y, tile.height))
                 if (
