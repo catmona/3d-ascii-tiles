@@ -9,11 +9,44 @@ export class Renderer {
     public Camera: Camera
     private canvas: HTMLCanvasElement
     private ctx: CanvasRenderingContext2D
+    // In Renderer class
+    private charAtlas: HTMLCanvasElement
+    private charAtlasCtx: CanvasRenderingContext2D
+    private charAtlasMap: Map<string, { x: number; y: number }> = new Map()
+
+    private buildCharAtlas(chars: string[], colors: string[]) {
+        const size = this.tileSize
+        const atlasCols = chars.length
+        const atlasRows = colors.length
+        this.charAtlas = document.createElement('canvas')
+        this.charAtlas.width = atlasCols * size
+        this.charAtlas.height = atlasRows * size
+        this.charAtlasCtx = this.charAtlas.getContext('2d')!
+
+        this.charAtlasCtx.font = `${size}px monospace`
+        this.charAtlasCtx.textAlign = 'center'
+        this.charAtlasCtx.textBaseline = 'middle'
+
+        for (let c = 0; c < chars.length; c++) {
+            for (let r = 0; r < colors.length; r++) {
+                const char = chars[c]
+                const color = colors[r]
+                const x = c * size + size / 2
+                const y = r * size + size / 2
+                this.charAtlasCtx.fillStyle = color
+                this.charAtlasCtx.fillText(char, x, y)
+                this.charAtlasMap.set(`${char}_${color}`, {
+                    x: c * size,
+                    y: r * size,
+                })
+            }
+        }
+    }
 
     public constructor() {
         this.tileSize = 20
-        this.mapWidth = 400
-        this.mapHeight = 400
+        this.mapWidth = 100
+        this.mapHeight = 100
         this.Camera = new Camera()
         this.canvas = document.getElementById('layer-game') as HTMLCanvasElement
         this.ctx = this.canvas.getContext('2d')!
@@ -34,6 +67,8 @@ export class Renderer {
             '#556B2F',
             '#7CFC00',
         ]
+
+        this.buildCharAtlas(grassChars, grassColors)
 
         // default map
         this.map = []
@@ -110,8 +145,22 @@ export class Renderer {
                         this.canvas.height
                     )
                 ) {
-                    this.ctx.fillStyle = tile.color
-                    this.ctx.fillText(tile.char, sx, sy)
+                    const atlasPos = this.charAtlasMap.get(
+                        `${tile.char}_${tile.color}`
+                    )
+                    if (atlasPos) {
+                        this.ctx.drawImage(
+                            this.charAtlas,
+                            atlasPos.x,
+                            atlasPos.y,
+                            this.tileSize,
+                            this.tileSize,
+                            sx - this.tileSize / 2,
+                            sy - this.tileSize / 2,
+                            this.tileSize,
+                            this.tileSize
+                        )
+                    }
                 }
             }
         }
