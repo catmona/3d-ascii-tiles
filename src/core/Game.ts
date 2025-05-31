@@ -1,10 +1,9 @@
-import { Renderer } from '../render/Renderer'
+import { renderer } from '../render/Renderer'
 import { InputController } from '../utils/Input'
 
 export function startGame() {
     console.log('Game started')
 
-    const renderer = new Renderer()
     const inputController = new InputController(renderer.Camera)
 
     let lastTime = performance.now()

@@ -1,3 +1,4 @@
+import { Vector3 } from '../core/Types'
 import { Camera } from '../render/Camera'
 
 export class InputController {
@@ -20,9 +21,9 @@ export class InputController {
                 const dy = e.clientY - lastMouseY
 
                 // Clamp pitch to prevent flipping
-                camera.pitch = Math.max(
+                camera.pitch.data = Math.max(
                     -Math.PI / 2,
-                    Math.min(Math.PI / 2, camera.pitch - dy * 0.002)
+                    Math.min(Math.PI / 2, camera.pitch.data - dy * 0.002)
                 ) // adjust sensitivity and clamp pitch
             }
             lastMouseY = e.clientY
@@ -35,22 +36,34 @@ export class InputController {
             if (e.key === 'd') MoveRight()
         })
 
-        const speed = 0.1
+        const speed = 1
         function MoveUp() {
-            camera.position.x += camera.forward.x * speed
-            camera.position.y += camera.forward.y * speed
+            camera.move(
+                Math.sin(camera.rotation.data) * speed,
+                Math.cos(camera.rotation.data) * speed,
+                0
+            )
         }
         function MoveDown() {
-            camera.position.x -= camera.forward.x * speed
-            camera.position.y -= camera.forward.y * speed
+            camera.move(
+                -Math.sin(camera.rotation.data) * speed,
+                -Math.cos(camera.rotation.data) * speed,
+                0
+            )
         }
         function MoveLeft() {
-            camera.position.x -= camera.right.x * speed
-            camera.position.y -= camera.right.y * speed
+            camera.move(
+                -Math.cos(camera.rotation.data) * speed,
+                Math.sin(camera.rotation.data) * speed,
+                0
+            )
         }
         function MoveRight() {
-            camera.position.x += camera.right.x * speed
-            camera.position.y += camera.right.y * speed
+            camera.move(
+                Math.cos(camera.rotation.data) * speed,
+                -Math.sin(camera.rotation.data) * speed,
+                0
+            )
         }
     }
 }

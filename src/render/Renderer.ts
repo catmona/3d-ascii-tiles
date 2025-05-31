@@ -51,18 +51,18 @@ export class Renderer {
     }
 
     private toScreen(pos: Vector3) {
-        const cosRot = Math.cos(this.Camera.rotation)
-        const sinRot = Math.sin(this.Camera.rotation)
+        const cosRot = Math.cos(this.Camera.rotation.data)
+        const sinRot = Math.sin(this.Camera.rotation.data)
 
-        const worldX = pos.x - this.Camera.position.x
-        const worldY = pos.y - this.Camera.position.y
+        const worldX = pos.x - this.Camera.position.data.x
+        const worldY = pos.y - this.Camera.position.data.y
 
         const rotatedX = worldX * cosRot - worldY * sinRot
         const rotatedY = worldX * sinRot + worldY * cosRot
 
         const isoX = rotatedX * this.tileSize
         const isoY =
-            rotatedY * this.tileSize * Math.sin(this.Camera.pitch) -
+            rotatedY * this.tileSize * Math.sin(this.Camera.pitch.data) -
             pos.z * (this.tileSize / 2)
 
         return [isoX, isoY]
@@ -113,3 +113,5 @@ export class Renderer {
         }
     }
 }
+
+export const renderer = new Renderer()

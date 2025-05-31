@@ -8,4 +8,8 @@ export class Vector3 {
         this.y = y
         this.z = z
     }
+
+    public static get Zero(): Vector3 {
+        return new Vector3(0, 0, 0)
+    }
 }
