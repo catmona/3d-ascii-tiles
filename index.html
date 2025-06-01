@@ -8,7 +8,16 @@
     </head>
     <body>
         <div class="100vh 100vw relative">
-            <canvas id="layer-game" class="absolute"></canvas>
+            <canvas
+                id="layer-game"
+                class="absolute bg-black top-0 left-0 100vh 100vw"
+                style="
+                    image-rendering: -moz-crisp-edges;
+                    image-rendering: -o-crisp-edges;
+                    image-rendering: crisp-edges;
+                    image-rendering: pixelated;
+                "
+            ></canvas>
             <div id="layer-ui" class="absolute"></div>
         </div>
 
