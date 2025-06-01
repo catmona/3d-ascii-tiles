@@ -1,60 +1,35 @@
-import * as PIXI from 'pixi.js'
-import { CompositeTilemap } from '@pixi/tilemap'
 import { Camera } from './Camera'
 import { Vector3 } from '../core/Types'
 import { TileMap } from '../map/TileMap'
-import { Signal } from '../utils/Signal'
 
 export class Renderer {
     public Camera: Camera
     public map: TileMap
-
-    private app: PIXI.Application
-    private tileLayer: CompositeTilemap
-    private atlasTexture: PIXI.Texture
-
-    // debug metrics
-    public tilesDrawn = new Signal<number>(0)
+    private canvas: HTMLCanvasElement
+    private ctx: CanvasRenderingContext2D
+    private charAtlas: HTMLCanvasElement
+    private charAtlasCtx: CanvasRenderingContext2D
+    private charAtlasMap: Map<string, { x: number; y: number }> = new Map()
 
     public constructor() {
-        void this.setup()
-    }
-
-    private async setup() {
         this.Camera = new Camera()
-        this.map = new TileMap(64, 100, 100)
+        this.map = new TileMap(20, 400, 400)
+        this.canvas = document.getElementById('layer-game') as HTMLCanvasElement
+        this.ctx = this.canvas.getContext('2d')!
 
-        this.app = new PIXI.Application()
+        this.ctx.font = `${this.map.tileSize}px monospace`
+        this.ctx.textAlign = 'center'
+        this.ctx.textBaseline = 'middle'
+        this.ctx.imageSmoothingEnabled = false
 
-        await this.app.init({
-            width: window.innerWidth,
-            height: window.innerHeight,
-            backgroundColor: 0x222222,
-            antialias: false,
-            resolution: window.devicePixelRatio || 1,
+        this.canvas.width = window.innerWidth
+        this.canvas.height = window.innerHeight
+
+        this.canvas.addEventListener('click', () => {
+            void this.canvas.requestPointerLock()
         })
 
-        const root = document.getElementById('layer-game') as HTMLDivElement
-        root.appendChild(this.app.canvas)
-
-        this.app.canvas.style.width = '100vw'
-        this.app.canvas.style.height = '100vh'
-        this.app.canvas.style.display = 'block'
-        this.app.canvas.style.position = 'absolute'
-        this.app.canvas.style.top = '0'
-        this.app.canvas.style.left = '0'
-
-        const atlasCanvas = this.buildCharAtlas(this.map.chars, this.map.colors)
-        this.atlasTexture = PIXI.Texture.from(atlasCanvas)
-        this.atlasTexture.source.scaleMode = 'nearest'
-        this.atlasTexture.source.update()
-
-        this.tileLayer = new CompositeTilemap([this.atlasTexture.source])
-        this.app.stage.addChild(this.tileLayer)
-
-        this.app.canvas.addEventListener('click', () => {
-            void this.app.canvas.requestPointerLock()
-        })
+        this.buildCharAtlas(this.map.chars, this.map.colors)
     }
 
     private toScreen(pos: Vector3) {
@@ -75,58 +50,65 @@ export class Renderer {
         return [isoX, isoY]
     }
 
-    private buildCharAtlas(
-        chars: string[],
-        colors: string[]
-    ): HTMLCanvasElement {
-        const tileSize = this.map.tileSize
-        const canvas = document.createElement('canvas')
-        const ctx = canvas.getContext('2d')!
-        if (!ctx) {
-            throw new Error('Failed to get canvas context')
-        }
-        canvas.width = tileSize * chars.length
-        canvas.height = tileSize * colors.length
+    private isVisible(
+        screenX: number,
+        screenY: number,
+        canvasWidth: number,
+        canvasHeight: number
+    ): boolean {
+        return (
+            screenX >= -this.map.tileSize &&
+            screenY >= -this.map.tileSize &&
+            screenX <= canvasWidth + this.map.tileSize &&
+            screenY <= canvasHeight + this.map.tileSize
+        )
+    }
 
-        ctx.font = `${tileSize}px monospace`
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
+    private buildCharAtlas(chars: string[], colors: string[]) {
+        this.charAtlas = document.createElement('canvas')
+        this.charAtlas.width = this.map.tileSize * chars.length
+        this.charAtlas.height = this.map.tileSize * colors.length
+        this.charAtlasCtx = this.charAtlas.getContext('2d')!
+
+        this.charAtlasCtx.font = `${this.map.tileSize}px monospace`
+        this.charAtlasCtx.textAlign = 'center'
+        this.charAtlasCtx.textBaseline = 'middle'
 
         for (let i = 0; i < chars.length; i++) {
             for (let j = 0; j < colors.length; j++) {
-                ctx.fillStyle = colors[j]
-                ctx.fillText(
-                    chars[i],
-                    i * tileSize + tileSize / 2,
-                    j * tileSize + tileSize / 2
+                const char = chars[i]
+                const color = colors[j]
+                this.charAtlasCtx.fillStyle = color
+                this.charAtlasCtx.fillText(
+                    char,
+                    i * this.map.tileSize + this.map.tileSize / 2,
+                    j * this.map.tileSize + this.map.tileSize / 2
                 )
+                this.charAtlasMap.set(`${char}_${color}`, {
+                    x: i * this.map.tileSize,
+                    y: j * this.map.tileSize,
+                })
             }
         }
-        return canvas
     }
-
     public Draw() {
-        if (!this.tileLayer) return
-        this.tileLayer.clear()
+        if (!this.canvas || !this.ctx) return
 
-        // this.tileLayer.tile(0, 100, 100, {
-        //     u: 0,
-        //     v: 0,
-        //     tileWidth: this.map.tileSize,
-        //     tileHeight: this.map.tileSize,
-        // })
-        // this.app.renderer.render(this.app.stage)
-        // return true
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0)
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+
+        this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2)
 
         // --- Culling: calculate visible tile bounds (axis-aligned, no rotation/pitch compensation) ---
         const searchRadius =
             Math.ceil(
                 Math.sqrt(
-                    (this.app.renderer.width / this.map.tileSize) ** 2 +
-                        (this.app.renderer.height / this.map.tileSize) ** 2
+                    (this.canvas.width / this.map.tileSize) ** 2 +
+                        (this.canvas.height / this.map.tileSize) ** 2
                 ) / 2
             ) + 2
 
+        // frustum culling calculations
         const camX = this.Camera.position.data.x
         const camY = this.Camera.position.data.y
 
@@ -138,8 +120,6 @@ export class Renderer {
             Math.ceil(camY + searchRadius)
         )
 
-        this.tilesDrawn.data = 0
-        // --- Draw visible tiles ---
         const tempVec = new Vector3(0, 0, 0)
         for (let y = minY; y < maxY; y++) {
             for (let x = minX; x < maxX; x++) {
@@ -148,39 +128,31 @@ export class Renderer {
                 tempVec.y = y
                 tempVec.z = tile.height
                 const [sx, sy] = this.toScreen(tempVec)
-
-                // Screen culling
                 if (
-                    sx + this.app.renderer.width / 2 < -this.map.tileSize ||
-                    sy + this.app.renderer.height / 2 < -this.map.tileSize ||
-                    sx + this.app.renderer.width / 2 >
-                        this.app.renderer.width + this.map.tileSize ||
-                    sy + this.app.renderer.height / 2 >
-                        this.app.renderer.height + this.map.tileSize
+                    this.isVisible(
+                        sx + this.canvas.width / 2,
+                        sy + this.canvas.height / 2,
+                        this.canvas.width,
+                        this.canvas.height
+                    )
                 ) {
-                    continue
-                }
-
-                // Find atlas frame
-                const charIndex = this.map.chars.indexOf(tile.char)
-                const colorIndex = this.map.colors.indexOf(tile.color)
-                if (charIndex === -1 || colorIndex === -1) continue
-
-                // Calculate frame rectangle in atlas
-                const frameX = charIndex * this.map.tileSize
-                const frameY = colorIndex * this.map.tileSize
-                this.tileLayer.tile(
-                    0,
-                    sx - this.map.tileSize / 2 + this.app.renderer.width / 2,
-                    sy - this.map.tileSize / 2 + this.app.renderer.height / 2,
-                    {
-                        u: frameX,
-                        v: frameY,
-                        tileWidth: this.map.tileSize,
-                        tileHeight: this.map.tileSize,
+                    const atlasPos = this.charAtlasMap.get(
+                        `${tile.char}_${tile.color}`
+                    )
+                    if (atlasPos) {
+                        this.ctx.drawImage(
+                            this.charAtlas,
+                            atlasPos.x,
+                            atlasPos.y,
+                            this.map.tileSize,
+                            this.map.tileSize,
+                            sx - this.map.tileSize / 2,
+                            sy - this.map.tileSize / 2,
+                            this.map.tileSize,
+                            this.map.tileSize
+                        )
                     }
-                )
-                this.tilesDrawn.data++
+                }
             }
         }
     }
