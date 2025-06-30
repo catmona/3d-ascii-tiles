@@ -1,3 +1,4 @@
+import { EntityManager } from '../entities/EntityManager'
 import { renderer } from '../render/Renderer'
 import { InputController } from '../utils/Input'
 import { Signal } from '../utils/Signal'
@@ -8,6 +9,7 @@ export function startGame() {
     console.log('Game started')
 
     const inputController = new InputController()
+    const entityManager = new EntityManager()
 
     let lastTime = performance.now()
     const frameTimes: number[] = []
@@ -33,6 +35,11 @@ export function startGame() {
 
     function update(deltaTime: number) {
         // Update game logic here
+
+        entityManager.UpdateAll(deltaTime)
+
+        // TODO handle input in physics update
+
         if (inputController.keys.has('w')) {
             renderer.Camera.MoveForward(deltaTime * 0.01)
         }

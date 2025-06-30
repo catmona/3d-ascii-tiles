@@ -13,3 +13,7 @@ export class Vector3 {
         return new Vector3(0, 0, 0)
     }
 }
+
+export enum SystemType {
+    Physics,
+}

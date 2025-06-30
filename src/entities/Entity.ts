@@ -1,15 +1,22 @@
-import { Vector3 } from '../core/Types'
+import { SystemType, Vector3 } from '../core/Types'
 import { Signal } from '../utils/Signal'
 import { Transform } from './Transform'
 
 export abstract class Entity {
     public id: number // TODO id grabbing should be automatic
     public transform: Signal<Transform>
+    public systems: SystemType[] = []
 
-    public constructor(id: number, position: Vector3 = Vector3.Zero) {
-        this.id = id
+    public constructor(position: Vector3 = Vector3.Zero) {
+        this.id = -1 // Placeholder for ID, should be set by the entity manager
         this.transform = new Signal<Transform>(new Transform(position))
     }
+
+    public Update() {
+        // Update logic for the entity
+    }
+
+    public UpdatePhysics(deltaTime: number) {}
 
     public MoveForward(speed: number) {
         this.transform.data.move(

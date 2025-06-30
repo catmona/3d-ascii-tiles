@@ -21,7 +21,7 @@ export class Renderer {
     public draws: Signal<number> = new Signal(0)
 
     public constructor() {
-        this.Camera = new Camera(1)
+        this.Camera = new Camera()
         this.map = new TileMap(20, 400, 400)
         this.canvas = document.getElementById('layer-game') as HTMLCanvasElement
         this.canvas.width = window.innerWidth
