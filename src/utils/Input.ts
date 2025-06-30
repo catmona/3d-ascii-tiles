@@ -2,6 +2,7 @@ import { renderer } from '../render/Renderer'
 
 export class InputController {
     public keys = new Set<string>()
+    public sensitivity = 0.002
 
     public constructor() {
         window.addEventListener('mousemove', (e) => {
@@ -9,15 +10,9 @@ export class InputController {
                 const dx = -e.movementX
                 const dy = -e.movementY
 
-                renderer.Camera.rotate(dx * 0.002) // adjust sensitivity
-
-                // Clamp pitch to prevent flipping
-                renderer.Camera.pitch.data = Math.max(
-                    0,
-                    Math.min(
-                        Math.PI / 2,
-                        renderer.Camera.pitch.data - dy * 0.002
-                    )
+                renderer.Camera.transform.data.rotate(
+                    dx * this.sensitivity,
+                    dy * this.sensitivity
                 )
             }
         })

@@ -11,7 +11,7 @@ export class Renderer {
 
     private canvas: HTMLCanvasElement
     private regl: reglConstructor.Regl
-    private charAtlas: HTMLCanvasElement
+    private charAtlas!: HTMLCanvasElement
     private charAtlasTexture: regl.Texture2D
 
     private drawTiles!: regl.DrawCommand
@@ -21,7 +21,7 @@ export class Renderer {
     public draws: Signal<number> = new Signal(0)
 
     public constructor() {
-        this.Camera = new Camera()
+        this.Camera = new Camera(1)
         this.map = new TileMap(20, 400, 400)
         this.canvas = document.getElementById('layer-game') as HTMLCanvasElement
         this.canvas.width = window.innerWidth
@@ -97,18 +97,20 @@ export class Renderer {
     }
 
     private toScreen(pos: Vector3) {
-        const cosRot = Math.cos(this.Camera.rotation.data)
-        const sinRot = Math.sin(this.Camera.rotation.data)
+        const cosRot = Math.cos(this.Camera.transform.data.rotation)
+        const sinRot = Math.sin(this.Camera.transform.data.rotation)
 
-        const worldX = pos.x - this.Camera.position.data.x
-        const worldY = pos.y - this.Camera.position.data.y
+        const worldX = pos.x - this.Camera.transform.data.position.x
+        const worldY = pos.y - this.Camera.transform.data.position.y
 
         const rotatedX = worldX * cosRot - worldY * sinRot
         const rotatedY = worldX * sinRot + worldY * cosRot
 
         const isoX = rotatedX * this.map.tileSize
         const isoY =
-            rotatedY * this.map.tileSize * Math.sin(this.Camera.pitch.data) -
+            rotatedY *
+                this.map.tileSize *
+                Math.sin(this.Camera.transform.data.pitch) -
             pos.z * (this.map.tileSize / 2)
 
         // Center the world in the canvas
@@ -156,8 +158,8 @@ export class Renderer {
                 ) / 2
             ) + 2
 
-        const camX = this.Camera.position.data.x
-        const camY = this.Camera.position.data.y
+        const camX = this.Camera.transform.data.position.x
+        const camY = this.Camera.transform.data.position.y
 
         const minX = Math.max(0, Math.floor(camX - searchRadius))
         const maxX = Math.min(this.map.mapWidth, Math.ceil(camX + searchRadius))
