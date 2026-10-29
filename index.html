@@ -7,16 +7,10 @@
         <title>Map Test</title>
     </head>
     <body>
-        <div class="100vh 100vw relative">
+        <div class="relative h-screen w-screen overflow-hidden bg-black">
             <canvas
                 id="layer-game"
-                class="absolute bg-black top-0 left-0 100vh 100vw"
-                style="
-                    image-rendering: -moz-crisp-edges;
-                    image-rendering: -o-crisp-edges;
-                    image-rendering: crisp-edges;
-                    image-rendering: pixelated;
-                "
+                class="absolute left-0 top-0 block h-screen w-screen"
             ></canvas>
             <div id="layer-ui" class="absolute"></div>
         </div>

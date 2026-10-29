@@ -16,7 +16,8 @@ export abstract class Entity {
         // Update logic for the entity
     }
 
-    public UpdatePhysics(deltaTime: number) {}
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    public UpdatePhysics(_deltaTime: number) {}
 
     public MoveForward(speed: number) {
         this.transform.data.move(

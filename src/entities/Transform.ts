@@ -52,6 +52,13 @@ export class Transform {
         }
     }
 
+    public orient(rotation: number, pitch: number) {
+        this.rotation = rotation
+        this.pitch = pitch
+
+        this.UpdateDirectionVectors()
+    }
+
     public rotate(dRotation: number, dPitch: number) {
         this.rotation += dRotation
 
