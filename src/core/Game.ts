@@ -60,6 +60,8 @@ export function startGame() {
         // Update game logic here
 
         entityManager.UpdateAll(deltaTime)
+        // Hold T and the day races by
+        renderer.sky.Advance(deltaTime, inputController.keys.has('t'))
 
         // TODO handle input in physics update
 
@@ -75,7 +77,7 @@ export function startGame() {
                 (WALK_SPEED * (keys.has('shift') ? SPRINT : 1) * deltaTime) /
                 1000 /
                 Math.hypot(forward, strafe)
-            const scale = speed * (camera.distance.data / 60)
+            const scale = speed * (camera.zoom / 60)
             const position = marker.position
             position.x = clamp(
                 position.x +
@@ -97,7 +99,8 @@ export function startGame() {
         camera.Control(inputController, deltaTime)
         camera.Follow(
             new Vector3(marker.position.x, marker.position.y, ground),
-            deltaTime
+            deltaTime,
+            (x, y) => map.HeightAt(x, y)
         )
         inputController.EndFrame()
     }

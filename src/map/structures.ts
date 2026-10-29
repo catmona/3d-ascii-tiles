@@ -1,7 +1,8 @@
 import { Vector3 } from '../core/Types'
-import { MUSHROOM_CAPS } from './flora'
 import { Light } from './Lighting'
+import { Stone } from './stones'
 import { Detail, Glyph, Plant, Prop, Tile } from './Tile'
+import { FAIRY_FLOWERS, TOADSTOOLS, tinyToadstool } from './undergrowth'
 
 // What the builders need from the map
 export interface World {
@@ -22,6 +23,8 @@ const ROOFS = [
 ]
 const BANNERS = ['#e03a4a', '#3a6ae0', '#e0b83a', '#9a3ae0']
 const BEACONS = ['#8f7bff', '#3ad6ff']
+const IVY = ['#1e4a24', '#2a6230', '#3a7a3a', '#4e9448']
+const MOSSY_GRAVESTONE = ['#7a8a72', '#6a7a64']
 
 // Oversized so the courses of a wall overlap into solid masonry
 function stone(world: World): Glyph {
@@ -36,6 +39,45 @@ function candlelitWindow(): Glyph {
 export function clear(tile: Tile) {
     tile.props = []
     tile.plant = Plant.None
+}
+
+// Grow something on a tile (see TileMap.sow: the seed's low bits are the variant)
+function plant(world: World, tile: Tile, kind: Plant, variant = 0) {
+    tile.plant = kind
+    tile.plantSeed = Math.floor(world.random() * 2 ** 28) * 8 + variant
+}
+
+// Moss creeps out over the ground at the foot of old walls
+function moss(tile: Tile | undefined, density = 5) {
+    if (!tile || tile.liquid || tile.stack.length > 0) return
+    tile.detail = Detail.Moss
+    tile.density = density
+}
+
+// Ivy climbing the outer face of a wall: a few leaves held just off the stones,
+// on the side facing (nx, ny)
+function ivy(world: World, tile: Tile, nx: number, ny: number) {
+    const reach = Math.min(tile.stack.length, 4)
+    const leaves: Prop[] = []
+    for (let i = 0; i < 2 + reach; i++) {
+        leaves.push({
+            char: world.pick(['♣', '♠', '♣']),
+            color: world.pick(IVY),
+            lift: 0.6 + world.random() * reach,
+            dx: nx * 0.6 + (world.random() - 0.5) * 0.8 * Math.abs(ny),
+            dy: ny * 0.6 + (world.random() - 0.5) * 0.8 * Math.abs(nx),
+            size: 0.45 + world.random() * 0.25,
+            shade: 0.85,
+        })
+    }
+    tile.props = [...tile.props, ...leaves]
+}
+
+// Which way a wall tile on the edge of a square faces outward
+function outward(dx: number, dy: number): [number, number] {
+    return Math.abs(dx) >= Math.abs(dy)
+        ? [Math.sign(dx), 0]
+        : [0, Math.sign(dy)]
 }
 
 // Flatten a square around a point to one height and clear whatever stood there
@@ -155,6 +197,7 @@ export function castle(world: World, cx: number, cy: number, size: number) {
             tile.elevation = elevation - 0.9
             tile.detail = Detail.Water
             tile.density = 3
+            if (world.random() < 0.08) plant(world, tile, Plant.LilyPads)
         } else if (edge >= moat - 1 && edge <= moat) {
             tile.char = '='
             tile.color = '#8a6440'
@@ -172,6 +215,25 @@ export function castle(world: World, cx: number, cy: number, size: number) {
             tile.density = Math.min(tile.density, 2) // trampled
         }
     })
+
+    // Moss along the foot of the curtain wall, inside and out, but not on the
+    // way through the gate
+    for (let t = -size - 1; t <= size + 1; t++) {
+        for (const [x, y] of [
+            [cx + t, cy - size - 1],
+            [cx + t, cy - size + 1],
+            [cx - size - 1, cy + t],
+            [cx - size + 1, cy + t],
+            [cx + size + 1, cy + t],
+            [cx + size - 1, cy + t],
+            [cx + t, cy + size + 1],
+            [cx + t, cy + size - 1],
+        ]) {
+            if (Math.abs(x - cx) > 2 || y < cy + size - 1) {
+                moss(world.map[y]?.[x], 4)
+            }
+        }
+    }
 
     // Torches along the wall top, every six stones
     for (let t = -size + 3; t <= size - 3; t += 6) {
@@ -198,6 +260,20 @@ export function castle(world: World, cx: number, cy: number, size: number) {
     }
     roundTower(world, cx, cy - 2, 4, 22, roof)
 
+    // A little ivy on the outside of the curtain wall
+    for (let t = -size + 3; t <= size - 3; t++) {
+        for (const [dx, dy] of [
+            [t, -size],
+            [-size, t],
+            [size, t],
+            [t, size],
+        ]) {
+            const tile = world.map[cy + dy][cx + dx]
+            if (tile.stack.length < 5 || world.random() > 0.12) continue
+            ivy(world, tile, ...outward(dx, dy))
+        }
+    }
+
     for (const [bx, by] of [
         [cx - 6, cy + 6],
         [cx + 6, cy + 6],
@@ -209,23 +285,47 @@ export function castle(world: World, cx: number, cy: number, size: number) {
 }
 
 // A ruined keep: crumbling walls with a door on the south side, a tower on the
-// north-east corner, torches by the door and a campfire in the yard
+// north-east corner, torches by the door and a campfire in the yard. Moss has
+// crept over the ground along the walls, ivy up them, and fallen stones lie about.
 export function ruin(world: World, cx: number, cy: number, radius: number) {
     clearSite(world, cx, cy, radius + 2, (tile, dx, dy) => {
         const edge = Math.max(Math.abs(dx), Math.abs(dy))
         if (edge > radius) {
             tile.density = Math.min(tile.density, 2)
+            if (world.random() < 0.12) {
+                plant(
+                    world,
+                    tile,
+                    Plant.Rocks,
+                    world.pick([Stone.Grey, Stone.Mossy])
+                )
+            }
         } else if (edge < radius) {
             tile.char = world.pick(['.', ',', '·'])
             tile.color = world.pick(['#7d776c', '#6f695f'])
             tile.detail = Detail.Floor
             tile.density = 5
+            if (world.random() < 0.06)
+                plant(world, tile, Plant.Rocks, Stone.Mossy)
         } else if (!(dy === radius && Math.abs(dx) <= 1)) {
             const wall =
                 world.random() < 0.15 ? 0 : 1 + Math.floor(world.random() * 3)
             tile.stack = Array.from({ length: wall }, () => stone(world))
+            if (wall === 0) plant(world, tile, Plant.Rocks, Stone.Mossy)
         }
     })
+    for (let dy = -radius - 1; dy <= radius + 1; dy++) {
+        for (let dx = -radius - 1; dx <= radius + 1; dx++) {
+            const edge = Math.max(Math.abs(dx), Math.abs(dy))
+            const tile = world.map[cy + dy]?.[cx + dx]
+            if (!tile) continue
+            if (edge === radius && tile.stack.length > 0) {
+                if (world.random() < 0.4) ivy(world, tile, ...outward(dx, dy))
+            } else if (edge >= radius - 1 && tile.plant === Plant.None) {
+                moss(tile, edge < radius ? 6 : 5)
+            }
+        }
+    }
     watchtower(world, cx + radius, cy - radius, 10)
     for (const dx of [-2, 2]) {
         const tile = world.map[cy + radius][cx + dx]
@@ -251,6 +351,13 @@ export function watchtower(
             side && level % 4 === 2 ? candlelitWindow() : stone(world)
         )
     })
+    for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) === 2) {
+                moss(world.map[cy + dy]?.[cx + dx], 5)
+            }
+        }
+    }
     const color = world.pick(BEACONS)
     const tile = world.map[cy][cx]
     tile.props = [
@@ -265,19 +372,29 @@ export function watchtower(
     })
 }
 
-// Rows of headstones and crosses in a clearing, a few guttering candles among them
+// Rows of headstones and crosses in a clearing, some gone green with moss, a few
+// guttering candles among them; brambles round the edge, and here and there
+// bones that didn't stay buried
 export function graveyard(world: World, cx: number, cy: number) {
     for (let dy = -4; dy <= 4; dy++) {
         for (let dx = -6; dx <= 6; dx++) {
             const tile = world.map[cy + dy]?.[cx + dx]
             if (!tile || tile.liquid) continue
             clear(tile)
-            if (dy % 2 !== 0 || dx % 2 !== 0 || Math.abs(dy) > 3) continue
+            if (Math.abs(dx) === 6 || Math.abs(dy) === 4) {
+                if (world.random() < 0.3) plant(world, tile, Plant.Bramble)
+                continue
+            }
+            if (dy % 2 !== 0 || dx % 2 !== 0 || Math.abs(dy) > 3) {
+                if (world.random() < 0.02) plant(world, tile, Plant.Bones)
+                continue
+            }
             if (world.random() < 0.15) continue
+            const mossy = world.random() < 0.35
             tile.props = [
                 {
                     char: world.random() < 0.6 ? '∩' : '†',
-                    color: world.pick(GRAVESTONE),
+                    color: world.pick(mossy ? MOSSY_GRAVESTONE : GRAVESTONE),
                     lift: 0.55,
                     dx: (world.random() - 0.5) * 0.4,
                     size: 1.1,
@@ -308,13 +425,19 @@ export function graveyard(world: World, cx: number, cy: number) {
     }
 }
 
-// A ring of small glowing toadstools with a soft light hanging over the middle
+// A ring of small glowing toadstools around a patch of flowers, with a soft
+// light hanging over the middle
 export function fairyRing(world: World, cx: number, cy: number) {
-    const cap = world.pick(MUSHROOM_CAPS)
+    const ramp = world.pick(TOADSTOOLS)
+    const flowers = world.pick(FAIRY_FLOWERS)
     for (let dy = -5; dy <= 5; dy++) {
         for (let dx = -5; dx <= 5; dx++) {
             const tile = world.map[cy + dy]?.[cx + dx]
-            if (tile) clear(tile)
+            if (!tile) continue
+            clear(tile)
+            if (Math.hypot(dx, dy) < 2.5 && world.random() < 0.5) {
+                plant(world, tile, Plant.Flowers, flowers)
+            }
         }
     }
     for (let i = 0; i < 14; i++) {
@@ -322,26 +445,26 @@ export function fairyRing(world: World, cx: number, cy: number) {
         const x = cx + Math.cos(angle) * 3.5
         const y = cy + Math.sin(angle) * 3.5
         const tile = world.map[Math.round(y)][Math.round(x)]
+        const size = 0.45 + world.random() * 0.2
         tile.props = [
             ...tile.props,
-            {
-                char: '◓',
-                color: cap,
-                glow: true,
-                lift: 0.35,
-                dx: x - Math.round(x),
-                dy: y - Math.round(y),
-                size: 0.7,
-            },
+            ...tinyToadstool(
+                ramp[2],
+                size,
+                x - Math.round(x),
+                y - Math.round(y),
+                true
+            ),
         ]
     }
     const centre = world.map[cy][cx]
+    centre.plant = Plant.None
     centre.props = [
-        { char: '*', color: '#ffffff', glow: true, lift: 1.6, size: 0.8 },
+        { char: '✦', color: '#fff4fc', glow: true, lift: 1.6, size: 0.7 },
     ]
     world.lights.push({
         position: new Vector3(cx, cy, centre.elevation + 1.6),
-        color: cap,
+        color: ramp[3],
         radius: 10,
         intensity: 1.1,
         pulse: 1,

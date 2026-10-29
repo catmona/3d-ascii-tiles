@@ -6,11 +6,29 @@ import {
     FLOWER_CHAR,
     FLOWER_COLORS,
 } from './details'
-import { BILLBOARD_GLSL, GLYPH_FRAG, SKY_GLSL } from './glsl'
+import {
+    BILLBOARD_GLSL,
+    CASTER_FRAG,
+    DETAIL_LAMPS,
+    DETAIL_NORMAL,
+    FLAT,
+    GLYPH_FRAG,
+    LAMPS,
+    LIGHT_SPACE_GLSL,
+    NORMAL,
+    PROJECT_GLSL,
+    SKY_GLSL,
+    UPRIGHT,
+    packNormal,
+} from './glsl'
+import { LIGHT_CELL, LightGrid, buildLightGrid } from './LightGrid'
+import { ShadowMap } from './Shadows'
+import { DayCycle } from './Sky'
+import { buildTerrain } from './Terrain'
 import { Vector3 } from '../core/Types'
-import { Lighting, MAX_LIGHTS, MOTE_CHARS } from '../map/Lighting'
-import { FLORA_CHARS, SUN, grow } from '../map/flora'
-import { Detail, Glyph, Plant, Tile } from '../map/Tile'
+import { DYNAMIC_LIGHTS, Lighting, MOTE_CHARS } from '../map/Lighting'
+import { FLORA_CHARS, grow } from '../map/flora'
+import { Detail, Glyph, Plant } from '../map/Tile'
 import { TileMap } from '../map/TileMap'
 import { hash2 } from '../utils/Math'
 import { Signal } from '../utils/Signal'
@@ -36,12 +54,19 @@ const DETAIL_FLOATS = 6 // x, y, elevation, light, kind, density
 const DETAIL_STRIDE = DETAIL_FLOATS * 4
 
 // Far chunks get fewer blades per tile: they'd be sub-pixel anyway
+// The terrain occluder coarsens along with them (tiles per cell)
 const DETAIL_LODS = [
     // Just two levels: every change of level splits a draw, and up close those extra
     // draws cost more than the thinning saves
-    { blades: 8, within: 150 },
-    { blades: 2, within: Infinity },
+    { blades: 8, terrain: 1, within: 150 },
+    { blades: 2, terrain: 4, within: Infinity },
 ]
+
+// The terrain occluder only goes this far from the eye. Past it a hill hides little
+// (the view looks down over it), and testing every distant glyph against the
+// occluder's depth costs more than the few it hides (measured: +0.7 ms fully zoomed
+// out, where nothing at all was hidden)
+const OCCLUDE_WITHIN = 450
 
 // The map is stored chunk by chunk so a run of neighbouring chunks is one draw call,
 // and chunks outside the view are never sent at all
@@ -50,15 +75,33 @@ const CHUNK = 32
 // Power of two, so mipmap levels never blend one glyph into the next
 const ATLAS_CELL = 128
 
-// Dusk palette: a twilight sky, a soft slate behind the ground, and distant land
-// fading toward the horizon
-type RGB = [number, number, number]
-const ZENITH: RGB = [0.07, 0.1, 0.21]
-const HORIZON: RGB = [0.32, 0.36, 0.5]
-const HORIZON_GLOW: RGB = [0.24, 0.15, 0.11] // warm band right on the horizon
-const BACKDROP: RGB = [0.085, 0.12, 0.13] // behind the ground when looking down
+// Shadows cover the ground this many times the camera distance around the focus
+// (within limits): enough for what's on screen, without spreading the texels thin
+const SHADOW_REACH = 1.6
+const SHADOW_MIN = 40
+const SHADOW_MAX = 400
+// Casters further off than this can't throw a shadow into view (the castle's towers
+// are the tallest things around), however low the sun
+const TALLEST = 24
+const LONGEST_SHADOW = 160
+// How far hills within the shadowed square rise and fall, for sizing the light's view
+const RELIEF = 30
+// The shadow map is only redrawn when it has to be: once the sun has moved this far
+// (radians), or the view has drifted this far (a fraction of the square) from where
+// it was drawn. The square is drawn this much bigger than it needs to be, so there's
+// room to drift.
+const SHADOW_TURN = 0.002
+const SHADOW_DRIFT = 0.2
+const SHADOW_SLACK = 1 + SHADOW_DRIFT
 
 const STATS_INTERVAL = 0.25 // seconds between HUD updates
+
+const NEIGHBOURS = [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+]
 
 const CORNERS = [
     [0, 0],
@@ -70,6 +113,14 @@ const QUAD = [0, 1, 2, 0, 2, 3]
 
 type DrawProps = { buffer: createREGL.Buffer; first: number; count: number }
 type DetailProps = { first: number; count: number; lod: number } // in detail tiles
+type TerrainProps = { lod: number; first: number; count: number } // in indices
+type CasterProps = { first: number; count: number } // in map glyphs
+type TerrainLod = {
+    positions: createREGL.Buffer
+    elements: createREGL.Elements
+    chunkFirst: Uint32Array // first index of each chunk
+    chunkCount: Uint32Array
+}
 
 // A run of neighbouring visible chunks in one row, drawn together. Detail runs also
 // share a detail level.
@@ -131,6 +182,7 @@ export class Renderer {
     public Camera: Camera
     public map: TileMap
     public lighting: Lighting
+    public sky = new DayCycle()
     public sprites: Sprite[] = []
 
     private canvas: HTMLCanvasElement
@@ -155,6 +207,32 @@ export class Renderer {
         createREGL.DefaultContext,
         DetailProps
     >
+    // Depth only: the hills hide what's behind them (null without 32-bit indices)
+    private drawTerrain: createREGL.DrawCommand<
+        createREGL.DefaultContext,
+        TerrainProps
+    > | null = null
+    private terrainLods = new Map<number, TerrainLod>() // by blades per tile
+    // The sun's view of the world, redrawn each frame as it moves
+    private shadow: ShadowMap
+    private drawCasters: createREGL.DrawCommand<
+        createREGL.DefaultContext,
+        CasterProps
+    >
+    private drawTerrainCaster: createREGL.DrawCommand<
+        createREGL.DefaultContext,
+        TerrainProps
+    > | null = null
+    private shadowRuns: Run[] = []
+    // Where the shadow map was last drawn from, to tell when it needs redrawing
+    private shadowDrawn = { key: [0, 0, 0], x: 0, y: 0, radius: 0 }
+    public shadowRedraws = 0
+    // Every fixed light in the map, sorted into a grid (see LightGrid.ts)
+    private lightGrid: LightGrid
+    private lightCells: createREGL.Texture2D
+    private lightRecords: createREGL.Texture2D
+    private lightCellCount: [number, number]
+    private lightRecordSize: [number, number]
     private mapBuffer: createREGL.Buffer
     private spriteBuffer: createREGL.Buffer
     private spriteGlyphs = new GlyphBuffer(MAX_SPRITES)
@@ -172,6 +250,7 @@ export class Renderer {
     private chunkRadius: Float32Array // bounding sphere, for frustum culling
     private glyphRuns: Run[] = []
     private detailRuns: Run[] = []
+    private terrainRuns: Run[] = []
 
     private frame: FrameUniforms = {
         eye: [0, 0, 0],
@@ -197,7 +276,6 @@ export class Renderer {
         const { x, y, z } = this.map.spawn
         this.Camera = new Camera(new Vector3(x, y, z), 0.6, 0.85)
         this.lighting = new Lighting(
-            this.map.lights,
             (lx, ly) => this.map.HeightAt(lx, ly),
             (lx, ly) => this.map.RegionAt(lx, ly)
         )
@@ -211,6 +289,7 @@ export class Renderer {
         this.regl = createREGL({
             canvas: this.canvas,
             extensions: ['ANGLE_instanced_arrays'],
+            optionalExtensions: ['OES_element_index_uint'],
             attributes: { alpha: false, antialias: true },
         })
 
@@ -225,6 +304,13 @@ export class Renderer {
         this.detailCount = new Uint32Array(chunks)
         this.chunkCenterZ = new Float32Array(chunks)
         this.chunkRadius = new Float32Array(chunks)
+
+        // Before the map: each glyph notes whether any fixed light reaches it
+        this.lightGrid = buildLightGrid(
+            this.map.lights,
+            this.map.mapWidth,
+            this.map.mapHeight
+        )
 
         // The map never changes, so it goes to the GPU once; each frame only sends the camera
         const { glyphs, details, detailTiles, detailGlyphs } = this.buildMap()
@@ -252,10 +338,37 @@ export class Renderer {
             length: MAX_SPRITES * STRIDE,
         })
 
+        const grid = this.lightGrid
+        const table = (data: Uint8Array, width: number, height: number) =>
+            this.regl.texture({
+                data,
+                width,
+                height,
+                format: 'rgba',
+                type: 'uint8',
+                min: 'nearest',
+                mag: 'nearest',
+                wrap: 'clamp',
+            })
+        this.lightCells = table(grid.cells, grid.cellsX, grid.cellsY)
+        this.lightRecords = table(
+            grid.records,
+            grid.recordWidth,
+            grid.recordHeight
+        )
+        this.lightCellCount = [grid.cellsX, grid.cellsY]
+        this.lightRecordSize = [grid.recordWidth, grid.recordHeight]
+        this.shadow = new ShadowMap(this.regl)
+
         this.drawSky = this.createSkyCommand()
         this.drawGlyphs = this.createGlyphCommand(false)
         this.drawXray = this.createGlyphCommand(true)
         this.drawDetails = this.createDetailCommand()
+        this.drawCasters = this.createCasterCommand()
+        if (this.regl.hasExtension('OES_element_index_uint')) {
+            this.drawTerrain = this.createTerrainCommand()
+            this.drawTerrainCaster = this.createTerrainCasterCommand()
+        }
     }
 
     private resize() {
@@ -275,11 +388,23 @@ export class Renderer {
                 context.viewportWidth,
                 context.viewportHeight,
             ],
-            uZenith: ZENITH,
-            uHorizon: HORIZON,
-            uGlow: HORIZON_GLOW,
-            uBackdrop: BACKDROP,
+            uZenith: () => this.sky.palette.zenith,
+            uHorizon: () => this.sky.palette.horizon,
+            uGlow: () => this.sky.palette.glow,
+            uBackdrop: () => this.sky.palette.backdrop,
+            uSunDir: () => this.sky.sun,
+            uGlowFocus: () => this.sky.palette.glowFocus,
             uTime: () => this.frame.time,
+        }
+    }
+
+    // The uniforms LIGHT_SPACE_GLSL reads
+    private lightSpaceUniforms() {
+        return {
+            uShadowX: () => this.shadow.axisX,
+            uShadowY: () => this.shadow.axisY,
+            uShadowZ: () => this.shadow.axisZ,
+            uShadowScale: () => this.shadow.scale,
         }
     }
 
@@ -289,15 +414,26 @@ export class Renderer {
     private glyphUniforms() {
         const uniforms: Record<string, unknown> = {
             ...this.skyUniforms(),
+            ...this.lightSpaceUniforms(),
             atlas: this.atlas,
             uCellUV: this.cellUV,
             uEye: () => this.frame.eye,
             uFogStart: () => this.frame.fogStart,
             uFogRange: () => this.frame.fogRange,
             uLightBounds: () => this.lighting.bounds,
+            uLightCells: this.lightCells,
+            uLightRecords: this.lightRecords,
+            uLightCellCount: this.lightCellCount,
+            uLightRecordSize: this.lightRecordSize,
+            uLightScale: () => this.sky.palette.lights,
+            uKeyDir: () => this.sky.key,
+            uKeyColor: () => this.sky.keyColor,
+            uAmbient: () => this.sky.palette.ambient,
+            uGlowLevel: () => this.sky.palette.glyphGlow,
+            uShadowMap: this.shadow.texture,
         }
         const { positions, colors } = this.lighting
-        for (let i = 0; i < MAX_LIGHTS; i++) {
+        for (let i = 0; i < DYNAMIC_LIGHTS; i++) {
             const position = positions.subarray(i * 4, i * 4 + 4)
             const color = colors.subarray(i * 4, i * 4 + 4)
             uniforms[`uLightPos[${i}]`] = () => position
@@ -320,6 +456,10 @@ export class Renderer {
             frag: `
             precision highp float;
             uniform float uTime;
+            uniform float uStars;
+            uniform vec3 uMoonDir;
+            uniform float uMoonGlow;
+            uniform vec3 uSunColor;
             ${SKY_GLSL}
 
             // A sparse field of twinkling stars above the horizon
@@ -331,18 +471,26 @@ export class Renderer {
                 return step(0.988, h) * spot * twinkle * smoothstep(0.1, 0.35, dir.z);
             }
 
-            // A pale moon low in the north-west, with a soft halo
+            // A pale moon with a soft halo, faint by day
             vec3 moon(vec3 dir) {
-                float facing = dot(dir, normalize(vec3(-0.55, -0.75, 0.32)));
+                float facing = dot(dir, uMoonDir);
                 float disc = smoothstep(0.9988, 0.9991, facing);
                 float halo = pow(max(facing, 0.0), 300.0) * 0.35 + pow(max(facing, 0.0), 40.0) * 0.08;
-                return vec3(0.98, 0.95, 0.85) * disc + vec3(0.7, 0.75, 0.9) * halo;
+                return (vec3(0.98, 0.95, 0.85) * disc + vec3(0.7, 0.75, 0.9) * halo) * uMoonGlow;
+            }
+
+            // The sun's disc and the haze lit up around it, reddening as it sets
+            vec3 sun(vec3 dir) {
+                float facing = max(dot(dir, uSunDir), 0.0);
+                float disc = smoothstep(0.9993, 0.9996, facing);
+                float halo = pow(facing, 400.0) * 0.6 + pow(facing, 24.0) * 0.12;
+                return uSunColor * (disc * 2.0 + halo) * smoothstep(-0.03, 0.02, uSunDir.z);
             }
 
             void main() {
                 vec3 dir = viewRay(gl_FragCoord.xy);
-                vec3 sky = skyColor(dir) + vec3(0.6, 0.65, 0.8) * stars(dir);
-                gl_FragColor = vec4(sky + moon(dir), 1.0);
+                vec3 sky = skyColor(dir) + vec3(0.6, 0.65, 0.8) * stars(dir) * uStars;
+                gl_FragColor = vec4(sky + moon(dir) + sun(dir), 1.0);
             }
             `,
             attributes: {
@@ -353,7 +501,13 @@ export class Renderer {
                 ],
             },
             count: 3,
-            uniforms: this.skyUniforms(),
+            uniforms: {
+                ...this.skyUniforms(),
+                uStars: () => this.sky.palette.stars,
+                uMoonDir: () => this.sky.moon,
+                uMoonGlow: () => this.sky.moonGlow,
+                uSunColor: () => this.sky.palette.sun,
+            },
             depth: { enable: false, mask: false },
         })
     }
@@ -383,11 +537,16 @@ export class Renderer {
             ${BILLBOARD_GLSL}
 
             void main() {
-                float ripple = step(abs(effect - ${RIPPLE}.0), 0.5)
+                float upright;
+                float lamps;
+                vec3 normal;
+                float kind = unpackEffect(effect, upright, lamps, normal);
+                float ripple = step(abs(kind - ${RIPPLE}.0), 0.5)
                     * 0.2 * sin(uTime * 1.5 + world.x * 0.5 + world.y * 0.35);
-                float blinking = step(abs(effect - ${BLINK}.0), 0.5);
-                float glow = step(abs(effect - ${GLOW}.0), 0.5) + blinking;
-                billboard(world, corner, size, uv, color, shade + ripple, glow);
+                float blinking = step(abs(kind - ${BLINK}.0), 0.5);
+                float glow = step(abs(kind - ${GLOW}.0), 0.5) + blinking;
+                billboard(world, corner, size, uv, color, shade + ripple, glow, normal,
+                    upright, lamps);
 
                 // Eyes open for a while, shut for a while, and blink now and then
                 float open = step(-0.3, sin(uTime * 0.45 + world.x * 1.7 + world.y * 2.3))
@@ -483,7 +642,12 @@ export class Renderer {
             }
 
             void main() {
-                int kind = int(info.x + 0.5);
+                // The tile's kind of detail, whether lamps reach it, and its slope
+                float code = floor(info.x / ${DETAIL_NORMAL}.0);
+                float rest = info.x - code * ${DETAIL_NORMAL}.0;
+                float lamps = floor(rest / ${DETAIL_LAMPS}.0);
+                int kind = int(rest - lamps * ${DETAIL_LAMPS}.0 + 0.5);
+                vec3 normal = unpackNormal(code);
                 vec4 shape = uDetailShape[kind];
                 bool water = abs(shape.w - 2.0) < 0.5;
 
@@ -525,7 +689,7 @@ export class Renderer {
                 if (abs(shape.w - 3.0) < 0.5) {
                     shade *= 0.85 + 1.2 * pow(max(0.0, sin(uTime * 2.5 + seed)), 12.0);
                 }
-                billboard(world, corner, size, uv, color, shade, 0.0);
+                billboard(world, corner, size, uv, color, shade, 0.0, normal, 0.0, lamps);
 
                 // Only as many blades as the tile's density allows at this level
                 if (blade >= ceil(info.y * uLod / ${BLADES}.0)) {
@@ -550,6 +714,172 @@ export class Renderer {
             depth: { enable: true, func: 'less' },
             blend: { enable: false },
             sample: { alpha: true },
+        })
+    }
+
+    // The terrain as a solid surface in the depth buffer only, drawn before any glyph.
+    // Glyphs behind a hill then fail the depth test (and mostly never reach the
+    // fragment shader at all)
+    private createTerrainCommand() {
+        const meshes = buildTerrain(
+            this.map,
+            CHUNK,
+            DETAIL_LODS.map((lod) => lod.terrain)
+        )
+        meshes.forEach((mesh, i) => {
+            this.terrainLods.set(DETAIL_LODS[i].blades, {
+                positions: this.regl.buffer(mesh.positions),
+                elements: this.regl.elements({
+                    data: mesh.elements,
+                    type: 'uint32',
+                }),
+                chunkFirst: mesh.chunkFirst,
+                chunkCount: mesh.chunkCount,
+            })
+        })
+        const lod = (p: TerrainProps) => this.terrainLods.get(p.lod)!
+        return this.regl<object, object, TerrainProps>({
+            vert: `
+            precision highp float;
+            attribute vec3 position;
+            ${PROJECT_GLSL}
+
+            void main() {
+                gl_Position = project(toView(position));
+            }
+            `,
+            frag: `
+            precision lowp float;
+            void main() {
+                gl_FragColor = vec4(0.0);
+            }
+            `,
+            attributes: {
+                position: (_: createREGL.DefaultContext, p: TerrainProps) =>
+                    lod(p).positions,
+            },
+            elements: (_: createREGL.DefaultContext, p: TerrainProps) =>
+                lod(p).elements,
+            offset: (_: createREGL.DefaultContext, p: TerrainProps) => p.first,
+            count: (_: createREGL.DefaultContext, p: TerrainProps) => p.count,
+            uniforms: {
+                uEye: () => this.frame.eye,
+                uRight: () => this.frame.right,
+                uUp: () => this.frame.up,
+                uForward: () => this.frame.forward,
+                uFocal: () => this.frame.focal,
+                uAspect: () => this.frame.aspect,
+            },
+            colorMask: [false, false, false, false],
+            depth: { enable: true, func: 'less', mask: true },
+            blend: { enable: false },
+            // Only the upper side occludes: if the eye ever dips below the ground,
+            // the underside mustn't blank out the whole view. (Seen from above, the
+            // mesh winds clockwise on screen.)
+            cull: { enable: true, face: 'back' },
+            frontFace: 'cw',
+        })
+    }
+
+    // Walls, trees and props as the sun sees them: cards facing the light, cut to the
+    // shape of their ink. The ground doesn't cast (the terrain mesh does that), nor
+    // does anything that glows.
+    private createCasterCommand() {
+        const instanced =
+            (offset: number) =>
+            (_: createREGL.DefaultContext, p: CasterProps) => ({
+                buffer: this.mapBuffer,
+                offset: p.first * STRIDE + offset * 4,
+                stride: STRIDE,
+                divisor: 1,
+            })
+
+        return this.regl<object, object, CasterProps>({
+            vert: `
+            precision highp float;
+            attribute vec2 corner;
+            attribute vec3 world;
+            attribute vec2 uv;
+            attribute float effect;
+            attribute float size;
+            uniform vec2 uCellUV;
+            varying vec2 vUv;
+            varying float vDepth;
+            ${LIGHT_SPACE_GLSL}
+
+            void main() {
+                float rest = mod(effect, ${LAMPS}.0);
+                float upright = floor(rest / ${UPRIGHT}.0);
+                float kind = rest - upright * ${UPRIGHT}.0;
+
+                vec3 s = lightSpace(world);
+                s.xy += vec2(corner.x - 0.5, 0.5 - corner.y) * size;
+                vDepth = s.z * uShadowScale.z * 0.5 + 0.5;
+                gl_Position = vec4(s.xy * uShadowScale.xy, vDepth * 2.0 - 1.0, 1.0);
+                vUv = uv + corner * uCellUV;
+                if (upright < 0.5 || kind > ${RIPPLE}.5) {
+                    gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                }
+            }
+            `,
+            frag: CASTER_FRAG,
+            attributes: {
+                corner: CORNERS,
+                world: instanced(0),
+                uv: instanced(3),
+                effect: instanced(9),
+                size: instanced(10),
+            },
+            elements: QUAD,
+            instances: (_: createREGL.DefaultContext, p: CasterProps) =>
+                p.count,
+            uniforms: {
+                ...this.lightSpaceUniforms(),
+                atlas: this.atlas,
+                uCellUV: this.cellUV,
+                uInked: 1,
+            },
+            framebuffer: this.shadow.framebuffer,
+            depth: { enable: true, func: 'less', mask: true },
+            blend: { enable: false },
+        })
+    }
+
+    // The hills as the sun sees them, so they shade the valleys behind them
+    private createTerrainCasterCommand() {
+        const lod = (p: TerrainProps) => this.terrainLods.get(p.lod)!
+        return this.regl<object, object, TerrainProps>({
+            vert: `
+            precision highp float;
+            attribute vec3 position;
+            varying vec2 vUv;
+            varying float vDepth;
+            ${LIGHT_SPACE_GLSL}
+
+            void main() {
+                vec3 s = lightSpace(position);
+                vDepth = s.z * uShadowScale.z * 0.5 + 0.5;
+                gl_Position = vec4(s.xy * uShadowScale.xy, vDepth * 2.0 - 1.0, 1.0);
+                vUv = vec2(0.0);
+            }
+            `,
+            frag: CASTER_FRAG,
+            attributes: {
+                position: (_: createREGL.DefaultContext, p: TerrainProps) =>
+                    lod(p).positions,
+            },
+            elements: (_: createREGL.DefaultContext, p: TerrainProps) =>
+                lod(p).elements,
+            offset: (_: createREGL.DefaultContext, p: TerrainProps) => p.first,
+            count: (_: createREGL.DefaultContext, p: TerrainProps) => p.count,
+            uniforms: {
+                ...this.lightSpaceUniforms(),
+                atlas: this.atlas,
+                uInked: 0,
+            },
+            framebuffer: this.shadow.framebuffer,
+            depth: { enable: true, func: 'less', mask: true },
+            blend: { enable: false },
         })
     }
 
@@ -657,8 +987,13 @@ export class Renderer {
                                     x,
                                     y,
                                     tile.elevation,
-                                    this.tileLight(tile) * tile.shadow,
-                                    tile.detail,
+                                    tile.light * tile.shadow,
+                                    tile.detail +
+                                        (this.lampsNear(x, y, 0.6)
+                                            ? DETAIL_LAMPS
+                                            : 0) +
+                                        DETAIL_NORMAL *
+                                            packNormal(tile.gx, tile.gy),
                                     Math.min(tile.density, BLADES),
                                 ],
                                 detailIndex++ * DETAIL_FLOATS
@@ -686,50 +1021,57 @@ export class Renderer {
         const jx = x + (hash2(x, y, 1) - 0.5) * 0.5
         const jy = y + (hash2(x, y, 2) - 0.5) * 0.5
         const lift = tile.liquid ? 0 : (hash2(x, y, 3) - 0.5) * 0.3
+        // The ground is lit by the sun on its slope, in the shader, as the sun moves
         this.pushGlyph(
             out,
             jx,
             jy,
             tile.elevation + lift,
             tile,
-            this.tileLight(tile) * tile.shadow,
-            tile.liquid ? RIPPLE : 0
+            tile.light * tile.shadow,
+            tile.liquid ? RIPPLE : 0,
+            packNormal(tile.gx, tile.gy),
+            false
         )
 
         // Where the ground drops away by more than a level, stack the rock face
+        // on the edge facing the drop: the terrain occluder slopes down across this
+        // tile toward its low side, so the face has to stand out past it to be seen
+        // from below (and is then hidden from above and behind, as rock should be)
         const neighbour = (nx: number, ny: number) =>
             map[ny]?.[nx]?.elevation ?? tile.elevation
-        const lowest = Math.min(
-            neighbour(x - 1, y),
-            neighbour(x + 1, y),
-            neighbour(x, y - 1),
-            neighbour(x, y + 1)
-        )
-        // A different face glyph each level, nudged a little, so cliffs read as
-        // broken rock rather than ruled columns
+        let lowest = tile.elevation
+        let faceX = 0
+        let faceY = 0
+        for (const [dx, dy] of NEIGHBOURS) {
+            const h = neighbour(x + dx, y + dy)
+            if (h < lowest) {
+                lowest = h
+                faceX = dx
+                faceY = dy
+            }
+        }
+        // A different face glyph each level, nudged a little along the face, so
+        // cliffs read as broken rock rather than ruled columns. The rock faces out
+        // over the drop and catches the sun from that side.
+        const face = packNormal(-faceX * 3, -faceY * 3)
         for (let level = 1; tile.elevation - level > lowest + 0.25; level++) {
             const z = tile.elevation - level
-            const shade =
-                this.tileLight(tile) * Math.max(0.45, 0.8 - level * 0.035)
+            const shade = tile.light * Math.max(0.55, 0.9 - level * 0.035)
             const side =
                 tile.side[
                     Math.floor(hash2(x, y, 10 + level) * tile.side.length)
                 ]
-            const fx = x + (hash2(x, y, 40 + level) - 0.5) * 0.3
-            const fy = y + (hash2(x, y, 70 + level) - 0.5) * 0.3
-            this.pushGlyph(out, fx, fy, z, side, shade)
+            const along = (hash2(x, y, 40 + level) - 0.5) * 0.6
+            const reach = 0.55 + (hash2(x, y, 70 + level) - 0.5) * 0.1
+            const fx = x + faceX * reach + faceY * along
+            const fy = y + faceY * reach + faceX * along
+            this.pushGlyph(out, fx, fy, z, side, shade, 0, face, false)
         }
 
         // Walls stay on the grid so their courses line up; trees are planted off it
         tile.stack.forEach((glyph, i) => {
-            this.pushGlyph(
-                out,
-                x,
-                y,
-                tile.elevation + 1 + i,
-                glyph,
-                this.tileLight(tile)
-            )
+            this.pushGlyph(out, x, y, tile.elevation + 1 + i, glyph, tile.light)
         })
         // Plants are grown from their seed right here and thrown away once drawn
         const props =
@@ -743,7 +1085,7 @@ export class Renderer {
                 jy + (prop.dy ?? 0),
                 tile.elevation + prop.lift,
                 prop,
-                this.tileLight(tile) * (prop.shade ?? 1)
+                tile.light * (prop.shade ?? 1)
             )
         }
     }
@@ -755,7 +1097,9 @@ export class Renderer {
         z: number,
         glyph: Glyph,
         shade: number,
-        effect = 0
+        effect = 0,
+        normal = FLAT, // packed (see glsl.ts); only the ground uses it
+        upright = true // walls, trees and props: they cast shadows
     ) {
         const uv = this.atlasUV.get(glyph.char)
         if (!uv) return
@@ -764,15 +1108,26 @@ export class Renderer {
         const lit = glyph.glow || glyph.blink
         const fx = glyph.blink ? BLINK : glyph.glow ? GLOW : effect
         const light = lit && effect !== GLOW ? 1 : shade
-        out.push(x, y, z, uv, rgb, light, fx, glyph.size ?? 1)
+        const packed =
+            fx +
+            (upright ? UPRIGHT : 0) +
+            (this.lampsNear(x, y, 0) ? LAMPS : 0) +
+            NORMAL * normal
+        out.push(x, y, z, uv, rgb, light, packed, glyph.size ?? 1)
     }
 
-    // The tile's ambient light times Lambert shading of its slope by the sun, so
-    // hills read as hills
-    private tileLight(tile: Tile): number {
-        const length = Math.hypot(tile.gx, tile.gy, 1)
-        const facing = (-tile.gx * SUN.x - tile.gy * SUN.y + SUN.z) / length
-        return tile.light * (0.45 + 0.65 * Math.max(0, facing))
+    // Whether any fixed light reaches the light grid cell(s) within `spread` of a point
+    private lampsNear(x: number, y: number, spread: number): boolean {
+        const { cells, cellsX, cellsY } = this.lightGrid
+        for (const dy of spread ? [-spread, spread] : [0]) {
+            for (const dx of spread ? [-spread, spread] : [0]) {
+                const cx = Math.floor((x + dx) / LIGHT_CELL)
+                const cy = Math.floor((y + dy) / LIGHT_CELL)
+                if (cx < 0 || cy < 0 || cx >= cellsX || cy >= cellsY) continue
+                if (cells[(cy * cellsX + cx) * 4 + 2] > 0) return true
+            }
+        }
+        return false
     }
 
     private rgb(hex: string): [number, number, number] {
@@ -858,34 +1213,148 @@ export class Renderer {
             this.Camera.distance.data
         const glyphRuns = this.glyphRuns
         const detailRuns = this.detailRuns
+        const terrainRuns = this.terrainRuns
         glyphRuns.length = 0
         detailRuns.length = 0
+        terrainRuns.length = 0
 
         for (let cy = 0; cy < this.chunksY; cy++) {
             let glyphRun: Run | null = null
             let detailRun: Run | null = null
+            let terrainRun: Run | null = null
             for (let cx = 0; cx < this.chunksX; cx++) {
                 const chunk = cy * this.chunksX + cx
                 const distance = this.chunkDistance(chunk, maxDistance)
-                if (distance < 0) {
-                    if (glyphRun) glyphRuns.push(glyphRun)
-                    if (detailRun) detailRuns.push(detailRun)
-                    glyphRun = detailRun = null
-                    continue
+                const lod = distance < 0 ? -1 : this.detailLod(distance)
+                const occludes = distance >= 0 && distance < OCCLUDE_WITHIN
+                // Close the runs this chunk can't extend
+                if (glyphRun && lod < 0) {
+                    glyphRuns.push(glyphRun)
+                    glyphRun = null
                 }
-                const lod = this.detailLod(distance)
                 if (detailRun && detailRun.lod !== lod) {
                     detailRuns.push(detailRun)
                     detailRun = null
                 }
+                if (terrainRun && (terrainRun.lod !== lod || !occludes)) {
+                    terrainRuns.push(terrainRun)
+                    terrainRun = null
+                }
+                if (lod < 0) continue
                 if (glyphRun) glyphRun.last = chunk
                 else glyphRun = { first: chunk, last: chunk, lod }
                 if (detailRun) detailRun.last = chunk
                 else detailRun = { first: chunk, last: chunk, lod }
+                if (!occludes) continue
+                if (terrainRun) terrainRun.last = chunk
+                else terrainRun = { first: chunk, last: chunk, lod }
             }
             if (glyphRun) glyphRuns.push(glyphRun)
             if (detailRun) detailRuns.push(detailRun)
+            if (terrainRun) terrainRuns.push(terrainRun)
         }
+    }
+
+    // Point the shadow map at the ground around the focus (a little ahead of it, where
+    // more of the view is) and redraw whatever can cast into it
+    private drawShadows(): number {
+        const { key, keyColor } = this.sky
+        if (keyColor[0] + keyColor[1] + keyColor[2] < 0.01) {
+            this.shadowDrawn.radius = 0 // nothing drawn; redraw when it's back
+            return 0
+        }
+
+        const distance = this.Camera.distance.data
+        const focus = this.Camera.transform.data.position
+        const { forward } = this.frame
+        const flat = Math.hypot(forward[0], forward[1]) || 1
+        const radius = Math.min(
+            SHADOW_MAX,
+            Math.max(SHADOW_MIN, distance * SHADOW_REACH)
+        )
+        const ahead = radius * 0.4
+        const cx = focus.x + (forward[0] / flat) * ahead
+        const cy = focus.y + (forward[1] / flat) * ahead
+
+        // Keep last frame's map unless the sun or the view has moved on
+        const drawn = this.shadowDrawn
+        const turned =
+            key[0] * drawn.key[0] +
+            key[1] * drawn.key[1] +
+            key[2] * drawn.key[2]
+        const fresh =
+            turned > Math.cos(SHADOW_TURN) &&
+            Math.hypot(cx - drawn.x, cy - drawn.y) < radius * SHADOW_DRIFT &&
+            radius * SHADOW_SLACK <= drawn.radius &&
+            radius * SHADOW_SLACK * 1.3 > drawn.radius
+        if (fresh) return 0
+        drawn.key = [...key]
+        drawn.x = cx
+        drawn.y = cy
+        drawn.radius = radius * SHADOW_SLACK
+        this.shadowRedraws++
+        this.shadow.Aim(key, [cx, cy, focus.z], drawn.radius, RELIEF)
+
+        // Anything tall enough, close enough toward the sun, can reach the square
+        const sunHeight = Math.max(0.05, key[2])
+        const reach =
+            drawn.radius +
+            Math.min(
+                LONGEST_SHADOW,
+                (TALLEST * Math.hypot(key[0], key[1])) / sunHeight
+            )
+        const runs = this.shadowRuns
+        runs.length = 0
+        for (let y = 0; y < this.chunksY; y++) {
+            let run: Run | null = null
+            for (let x = 0; x < this.chunksX; x++) {
+                const chunk = y * this.chunksX + x
+                const mx = (x + 0.5) * CHUNK
+                const my = (y + 0.5) * CHUNK
+                const r = this.chunkRadius[chunk]
+                const casts =
+                    Math.hypot(mx - cx, my - cy) < reach + r &&
+                    this.shadow.Covers(mx, my, this.chunkCenterZ[chunk], r)
+                if (!casts) {
+                    if (run) runs.push(run)
+                    run = null
+                } else if (run) run.last = chunk
+                else run = { first: chunk, last: chunk, lod: 0 }
+            }
+            if (run) runs.push(run)
+        }
+
+        this.regl.clear({
+            color: [1, 1, 1, 1],
+            depth: 1,
+            framebuffer: this.shadow.framebuffer,
+        })
+        // A big square means distant views: the coarse terrain is plenty there
+        const terrainLod = DETAIL_LODS[drawn.radius < 150 ? 0 : 1].blades
+        for (const run of runs) {
+            const first = this.chunkFirst[run.first]
+            const count =
+                this.chunkFirst[run.last] + this.chunkCount[run.last] - first
+            if (count > 0) this.drawCasters({ first, count })
+            if (this.drawTerrainCaster) {
+                const lod = this.terrainLods.get(terrainLod)!
+                const start = lod.chunkFirst[run.first]
+                const end = lod.chunkFirst[run.last] + lod.chunkCount[run.last]
+                this.drawTerrainCaster({
+                    lod: terrainLod,
+                    first: start,
+                    count: end - start,
+                })
+            }
+        }
+        return runs.length * (this.drawTerrainCaster ? 2 : 1)
+    }
+
+    private drawTerrainRun(run: Run) {
+        const { chunkFirst, chunkCount } = this.terrainLods.get(run.lod)!
+        const first = chunkFirst[run.first]
+        const count = chunkFirst[run.last] + chunkCount[run.last] - first
+        this.drawTerrain!({ lod: run.lod, first, count })
     }
 
     private drawGlyphRun(run: Run): number {
@@ -945,11 +1414,16 @@ export class Renderer {
             this.frame.time,
             this.Camera.transform.data.position
         )
-        this.regl.clear({ color: [...BACKDROP, 1], depth: 1 })
+        let calls = this.drawShadows()
+        this.regl.clear({ color: [...this.sky.palette.backdrop, 1], depth: 1 })
         this.drawSky()
 
         this.collectRuns()
-        let calls = 1 + this.glyphRuns.length + this.detailRuns.length
+        calls += 1 + this.glyphRuns.length + this.detailRuns.length
+        if (this.drawTerrain) {
+            for (const run of this.terrainRuns) this.drawTerrainRun(run)
+            calls += this.terrainRuns.length
+        }
         let drawn = 0
         for (const run of this.glyphRuns) drawn += this.drawGlyphRun(run)
         for (const run of this.detailRuns) drawn += this.drawDetailRun(run)
@@ -974,7 +1448,7 @@ export class Renderer {
             this.statsTime = this.frame.time
             this.draws.data = calls
             this.drawn.data = drawn
-            this.lights.data = this.lighting.count
+            this.lights.data = this.lighting.count + this.map.lights.length
         }
     }
 }

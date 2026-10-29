@@ -98,14 +98,14 @@ const LOOKS: Record<Detail, DetailLook> = {
         sway: 0.2,
         mode: DetailMode.Plain,
     },
-    // Glittering pastel grass
+    // Soft minty grass with the odd pastel blade, flowers here and there
     [Detail.Fairy]: {
-        chars: ['.', '*', "'", ',', '·', '`'],
-        colors: ['#ffb0e8', '#b8a2ff', '#8af0d0', '#ffe28a', '#a8e0ff'],
+        chars: [',', "'", '`', '.', '"', ';'],
+        colors: ['#4ea882', '#62b890', '#40966f', '#78c69e', '#9a8ad8'],
         size: 0.45,
         variation: 0.35,
         sway: 0.6,
-        mode: DetailMode.Sparkle,
+        mode: DetailMode.Flowers,
     },
     // Rubble with weeds pushing through, inside the keeps
     [Detail.Floor]: {
@@ -114,6 +114,33 @@ const LOOKS: Record<Detail, DetailLook> = {
         size: 0.45,
         variation: 0.3,
         sway: 0.2,
+        mode: DetailMode.Plain,
+    },
+    // A deep green carpet: low, dense, barely stirring
+    [Detail.Moss]: {
+        chars: ['∴', '"', ',', '·', '.', "'"],
+        colors: ['#2e5a26', '#3c7030', '#4e863a', '#2a4e30', '#64983e'],
+        size: 0.4,
+        variation: 0.3,
+        sway: 0.1,
+        mode: DetailMode.Plain,
+    },
+    // Rounded pebbles, wet and grey-brown
+    [Detail.Pebbles]: {
+        chars: ['•', '•', '·', '.', '•', '°'],
+        colors: ['#857f75', '#6b665e', '#9a9282', '#57534c', '#8c8270'],
+        size: 0.28,
+        variation: 0.25,
+        sway: 0,
+        mode: DetailMode.Plain,
+    },
+    // Broken stone sliding down a slope
+    [Detail.Scree]: {
+        chars: ['▴', '•', '∴', '.', '◆', ','],
+        colors: ['#8e877a', '#a49c8c', '#77716a', '#bab2a2', '#857a68'],
+        size: 0.32,
+        variation: 0.3,
+        sway: 0,
         mode: DetailMode.Plain,
     },
 }

@@ -11,9 +11,10 @@ export type Light = {
     pulse?: number // slow breathing, radians per second
 }
 
-export const MAX_LIGHTS = 40
 const MOTES = 12
-const REACH = 160 // fixed lights further than this from the camera don't matter
+// The lights that move: the player's lantern and the motes around them. The map's
+// fixed lights live in the renderer's light grid instead.
+export const DYNAMIC_LIGHTS = 1 + MOTES
 
 // The little lights that drift around the player take after the realm they're in
 type MoteStyle = {
@@ -70,27 +71,23 @@ export type Mote = {
     size: number
 }
 
-// Chooses the lights that matter this frame (the player's lantern, the motes
-// drifting around them, and the nearest of the map's fixed lights), animates them,
-// and packs them into flat arrays ready for the shader
+// Animates the lights that move (the player's lantern and the motes drifting around
+// them) and packs them into flat arrays ready for the shader
 export class Lighting {
     public lantern: Light
     public motes: Mote[]
-    public positions = new Float32Array(MAX_LIGHTS * 4) // xyz, radius
-    public colors = new Float32Array(MAX_LIGHTS * 4) // rgb scaled by intensity
+    public positions = new Float32Array(DYNAMIC_LIGHTS * 4) // xyz, radius
+    public colors = new Float32Array(DYNAMIC_LIGHTS * 4) // rgb scaled by intensity
     public bounds = new Float32Array(4) // a sphere no light reaches outside of
     public count = 0
 
-    private fixed: Light[]
     private heightAt: (x: number, y: number) => number
     private regionAt: (x: number, y: number) => Region
 
     public constructor(
-        fixed: Light[],
         heightAt: (x: number, y: number) => number,
         regionAt: (x: number, y: number) => Region
     ) {
-        this.fixed = fixed
         this.heightAt = heightAt
         this.regionAt = regionAt
         this.lantern = {
@@ -156,25 +153,8 @@ export class Lighting {
             )
         }
 
-        // Then the nearest fixed lights, as many as there's room for
-        const near = this.fixed
-            .map((light) => ({
-                light,
-                distance: Math.hypot(
-                    light.position.x - focus.x,
-                    light.position.y - focus.y
-                ),
-            }))
-            .filter((l) => l.distance < REACH + l.light.radius)
-            .sort((a, b) => a.distance - b.distance)
-        for (const { light } of near) {
-            if (this.count === MAX_LIGHTS) break
-            const p = light.position
-            this.add(light, p.x, p.y, p.z, time)
-        }
-
         // Unused slots: no colour, far away
-        for (let i = this.count; i < MAX_LIGHTS; i++) {
+        for (let i = this.count; i < DYNAMIC_LIGHTS; i++) {
             this.positions.set([1e6, 1e6, 1e6, 1], i * 4)
             this.colors.set([0, 0, 0, 0], i * 4)
         }

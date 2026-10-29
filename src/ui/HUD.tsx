@@ -1,4 +1,5 @@
 import { renderer } from '../render/Renderer'
+import { formatClock, partOfDay } from '../render/Sky'
 import { FPS } from '../core/Game'
 import { useSignal } from './useSignal'
 
@@ -11,6 +12,7 @@ export default function HUD() {
     const glyphs = useSignal(renderer.glyphs)
     const drawn = useSignal(renderer.drawn)
     const lights = useSignal(renderer.lights)
+    const clock = useSignal(renderer.sky.clock)
     const distance = useSignal(renderer.Camera.distance)
     const fov = useSignal(renderer.Camera.fov)
     const cameraTransform = useSignal(renderer.Camera.transform)
@@ -19,6 +21,9 @@ export default function HUD() {
     return (
         <div className="m-2 rounded bg-black/60 px-3 py-2 font-mono text-xs leading-5 text-white">
             <div>FPS: {Math.round(fps)}</div>
+            <div>
+                Time: {formatClock(clock)} · {partOfDay(clock)}
+            </div>
             <div>
                 Focus: ({position.x.toFixed(1)}, {position.y.toFixed(1)},{' '}
                 {position.z.toFixed(1)})
@@ -38,7 +43,7 @@ export default function HUD() {
             </div>
             <div className="mt-1 text-white/50">
                 WASD walk · shift sprint · drag orbit · Q/E turn 45° · R/F tilt
-                · scroll zoom · shift+scroll FOV
+                · scroll zoom · shift+scroll FOV · hold T to speed up time
             </div>
         </div>
     )

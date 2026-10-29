@@ -31,9 +31,13 @@ export enum Detail {
     Floor,
     Haunted,
     Fairy,
+    Moss, // damp forest floors and the feet of old walls
+    Pebbles, // shingle beaches
+    Scree, // broken stone on steep slopes
 }
 
-// Trees and other plants, grown from a seed when the map is drawn (see flora.ts)
+// Trees, undergrowth and stones, grown from a seed when the map is drawn (see
+// flora.ts). The seed's low bits pick a variant (a palette, mossy or not...).
 export enum Plant {
     None,
     Broadleaf,
@@ -41,7 +45,27 @@ export enum Plant {
     Dead,
     Gloom,
     Fairy,
-    Mushroom,
+    Toadstool,
+    Oak,
+    Birch,
+    Willow,
+    Poplar,
+    Sapling,
+    Bush,
+    Fern,
+    Flowers,
+    TallGrass,
+    Reeds,
+    LilyPads,
+    Fungus,
+    CrystalFlowers,
+    Bramble,
+    Bones,
+    Stump,
+    Log,
+    Boulder,
+    Rocks,
+    Outcrop,
 }
 
 // Parts of the world with their own character
@@ -66,7 +90,7 @@ export class Tile {
     // Most tiles have neither, so they share one empty array (replace it, never push to it)
     public stack: Glyph[] = NONE // Solid levels built on the surface (walls), one per level
     public props: Prop[] = NONE // Torches, graves and other things standing on the tile
-    public plant = Plant.None // A tree or toadstool, grown from plantSeed when drawn
+    public plant = Plant.None // A tree, bush, rock..., grown from plantSeed when drawn
     public plantSeed = 0
     public liquid = false // Surface ripples (water)
     public detail = Detail.None
